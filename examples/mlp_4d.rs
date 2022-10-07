@@ -1,6 +1,14 @@
-use halo2_machinelearning::{NNCircuit, nn_chip::{LayerParams, felt_to_i128}};
-use halo2_proofs::{pasta::{Fp, EqAffine}, dev::MockProver,
-plonk::{create_proof, keygen_vk, keygen_pk}, poly::commitment::Params, transcript::{Blake2bWrite, Challenge255}};
+use halo2_machinelearning::{
+    nn_chip::{LayerParams},
+    NNCircuit,
+};
+use halo2_proofs::{
+    dev::MockProver,
+    pasta::{EqAffine, Fp},
+    plonk::{create_proof, keygen_pk, keygen_vk},
+    poly::commitment::Params,
+    transcript::{Blake2bWrite, Challenge255},
+};
 
 use std::time::Instant;
 
@@ -9,28 +17,37 @@ use rand::rngs::OsRng;
 fn main() -> () {
     let layers = vec![
         LayerParams {
-            weights: vec![1, 1, -1, -1,
-                1, 1, -1, -1,
-                1, 1, -1, -1,
-                1, 1, -1, -1].into_iter().map(|x: i64| if x >=0 {Fp::from(x.unsigned_abs())} else {-Fp::from(x.unsigned_abs())}).collect(),
-            biases: vec![1, 1, 1, 5].into_iter().map(|x| Fp::from(x)).collect()
+            weights: vec![1, 1, -1, -1, 1, 1, -1, -1, 1, 1, -1, -1, 1, 1, -1, -1]
+                .into_iter()
+                .map(|x: i64| {
+                    if x >= 0 {
+                        Fp::from(x.unsigned_abs())
+                    } else {
+                        -Fp::from(x.unsigned_abs())
+                    }
+                })
+                .collect(),
+            biases: vec![1, 1, 1, 5].into_iter().map(|x| Fp::from(x)).collect(),
         },
         LayerParams {
-            weights: vec![1, 1, 1, 1,
-                1, 1, 1, 1,
-                1, 1, 1, 1,
-                1, 1, 1, 1].into_iter().map(|x| Fp::from(x)).collect(),
-            biases: vec![1, 1, 1, 1].into_iter().map(|x| Fp::from(x)).collect()
+            weights: vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+                .into_iter()
+                .map(|x| Fp::from(x))
+                .collect(),
+            biases: vec![1, 1, 1, 1].into_iter().map(|x| Fp::from(x)).collect(),
         },
     ];
 
     let input: Vec<Fp> = vec![1, 1, 1, 1].into_iter().map(|x| Fp::from(x)).collect();
 
-    let output: Vec<Fp> = vec![12, 12, 12, 12].into_iter().map(|x| Fp::from(x)).collect();
+    let output: Vec<Fp> = vec![12, 12, 12, 12]
+        .into_iter()
+        .map(|x| Fp::from(x))
+        .collect();
 
     let circuit = NNCircuit::<Fp> {
         layers,
-        input: input.clone()
+        input: input.clone(),
     };
 
     MockProver::run(
@@ -49,8 +66,15 @@ fn main() -> () {
 
     // let now = Instant::now();
 
-    // create_proof(&params, &pk, &[circuit], &[&[input.as_slice(), output.as_slice()]], OsRng, &mut transcript).unwrap();
+    // create_proof(
+    //     &params,
+    //     &pk,
+    //     &[circuit],
+    //     &[&[input.as_slice(), output.as_slice()]],
+    //     OsRng,
+    //     &mut transcript,
+    // )
+    // .unwrap();
 
     // println!("Proof took {:?}", now.elapsed().as_secs());
-
 }
