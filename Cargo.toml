@@ -1,0 +1,12 @@
+[package]
+name = "halo2_machinelearning"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+derive_more = "0.99.17"
+halo2_proofs = { git = "https://github.com/zcash/halo2.git", rev = "ac738ca5a143eb0389e73381967b5ab0280ed64e"}
+icecream = "0.1.0"
+rand = "0.8.5"
