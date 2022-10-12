@@ -13,22 +13,26 @@ use halo2_proofs::{
 use crate::nn_ops::eltwise_ops::EltwiseInstructions;
 
 //TODO: move somehwere more appropriate
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct LayerParams<F: FieldExt> {
     pub weights: Vec<F>,
     pub biases: Vec<F>,
 }
 
 #[derive(Clone, Debug)]
-pub struct ForwardLayerConfig<F: FieldExt, Elt: EltwiseInstructions<F>> {
-    pub weights: Vec<Column<Advice>>,
+pub struct ForwardLayerConfig<
+    F: FieldExt,
+    Elt: EltwiseInstructions<F>,
+    const WIDTH: usize,
+    const HEIGHT: usize,
+> {
+    pub weights: [Column<Advice>; WIDTH],
     pub bias: Column<Advice>,
     pub input: Column<Advice>,
     pub output: Column<Advice>,
     pub eltwise: Elt,
     // pub eltwise_inter: Vec<Column<Advice>>,
     // pub eltwise_output: Column<Advice>,
-    pub dims: [usize; 2],
     pub nn_selector: Selector,
     // pub elt_selector: Selector,
     _marker: PhantomData<F>,
@@ -72,13 +76,20 @@ pub trait NNLayerInstructions<F: FieldExt>: Chip<F> {
 
 #[derive(Clone, Debug)]
 ///Chip to prove NeuralNet operations
-pub struct ForwardLayerChip<F: FieldExt, Elt: EltwiseInstructions<F>> {
-    config: ForwardLayerConfig<F, Elt>,
+pub struct ForwardLayerChip<
+    F: FieldExt,
+    Elt: EltwiseInstructions<F>,
+    const WIDTH: usize,
+    const HEIGHT: usize,
+> {
+    config: ForwardLayerConfig<F, Elt, WIDTH, HEIGHT>,
     _marker: PhantomData<(F, Elt)>,
 }
 
-impl<F: FieldExt, Elt: EltwiseInstructions<F>> Chip<F> for ForwardLayerChip<F, Elt> {
-    type Config = ForwardLayerConfig<F, Elt>;
+impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT: usize> Chip<F>
+    for ForwardLayerChip<F, Elt, WIDTH, HEIGHT>
+{
+    type Config = ForwardLayerConfig<F, Elt, WIDTH, HEIGHT>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -90,7 +101,9 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> Chip<F> for ForwardLayerChip<F, E
     }
 }
 
-impl<F: FieldExt, Elt: EltwiseInstructions<F>> ForwardLayerChip<F, Elt> {
+impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT: usize>
+    ForwardLayerChip<F, Elt, WIDTH, HEIGHT>
+{
     pub fn construct(config: <Self as Chip<F>>::Config) -> Self {
         Self {
             config,
@@ -102,19 +115,22 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> ForwardLayerChip<F, Elt> {
         meta: &mut ConstraintSystem<F>,
         //layer: ForwardLayerConfig<F, BASE, Elt>,
         input: Column<Advice>,
-        weights: Vec<Column<Advice>>,
+        weights: [Column<Advice>; WIDTH],
         bias: Column<Advice>,
         output: Column<Advice>,
         elt_chip: Elt,
-        dims: [usize; 2],
     ) -> <Self as Chip<F>>::Config {
         let nn_selector = meta.selector();
         meta.create_gate("affine", |meta| {
             let q = meta.query_selector(nn_selector);
-            let out_dim = dims[0];
+            let out_dim = HEIGHT;
             // We put the negation of the claimed output in the constraint tensor.
             let constraints: Vec<Expression<F>> = (0..out_dim)
                 .map(|i| -meta.query_advice(output, Rotation(i as i32)))
+                .collect();
+
+            let inputs: Vec<Expression<F>> = (0..WIDTH)
+                .map(|index| meta.query_advice(input, Rotation(index as i32)))
                 .collect();
 
             // Now we compute the linear expression,  and add it to constraints
@@ -124,9 +140,9 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> ForwardLayerChip<F, Elt> {
                 .map(|item| {
                     let i = item.0;
                     let mut c = item.1.clone();
-                    for j in 0..dims[1] {
-                        c = c + meta.query_advice(weights[i], Rotation(j as i32))
-                            * meta.query_advice(input, Rotation(j as i32));
+                    for j in 0..WIDTH {
+                        c = c + meta.query_advice(weights[j], Rotation(i as i32))
+                            * inputs[j].clone();
                     }
                     // add the bias
                     q.clone() * (c + meta.query_advice(bias, Rotation(i as i32)))
@@ -143,7 +159,6 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> ForwardLayerChip<F, Elt> {
             bias,
             output,
             eltwise: elt_chip,
-            dims,
             nn_selector,
             _marker: PhantomData,
         }
@@ -153,7 +168,9 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> ForwardLayerChip<F, Elt> {
 #[derive(Clone, Debug)]
 pub struct Number<F: FieldExt>(pub AssignedCell<F, F>);
 
-impl<F: FieldExt, Elt: EltwiseInstructions<F>> NNLayerInstructions<F> for ForwardLayerChip<F, Elt> {
+impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT: usize>
+    NNLayerInstructions<F> for ForwardLayerChip<F, Elt, WIDTH, HEIGHT>
+{
     type Num = Number<F>;
 
     fn load_input_constant(
@@ -274,9 +291,9 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> NNLayerInstructions<F> for Forwar
                                 region.assign_advice(
                                     || "assigning weights".to_string(),
                                     // row indices
-                                    config.weights[iii % config.dims[1]],
+                                    config.weights[iii % WIDTH],
                                     // columns indices
-                                    offset + (iii / config.dims[1]),
+                                    offset + (iii / WIDTH),
                                     || Value::known(*weight),
                                 )
                             })
@@ -288,7 +305,7 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> NNLayerInstructions<F> for Forwar
 
                 //calculate output and assign it to layer output
                 let mat_output: Vec<AssignedCell<Assigned<F>, F>> = {
-                    let out_dim = config.dims[0];
+                    let out_dim = HEIGHT;
 
                     for (i, x) in input.iter().enumerate() {
                         x.copy_advice(|| "input", &mut region, config.input, offset + i)?;
@@ -299,8 +316,7 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> NNLayerInstructions<F> for Forwar
                         .map(|i| {
                             let mut o: Value<Assigned<F>> = Value::known(F::zero().into());
                             for (j, x) in input.iter().enumerate() {
-                                o = o + weights[i + (j * config.dims[0])].value_field()
-                                    * x.value_field();
+                                o = o + weights[j + (i * WIDTH)].value_field() * x.value_field();
                             }
                             o + biases[i].value_field()
                         })

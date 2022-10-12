@@ -7,10 +7,9 @@ use halo2_proofs::{
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance},
 };
 use nn_chip::{ForwardLayerChip, ForwardLayerConfig, LayerParams, NNLayerInstructions};
-use nn_ops::eltwise_ops::ReluChip;
+use nn_ops::eltwise_ops::{NormalizeChip, NormalizeReluChip, ReluChip};
 
 use crate::nn_ops::lookup_ops::DecompTable;
-
 
 #[derive(Clone, Debug)]
 ///Config for Neural Net Chip
@@ -18,10 +17,10 @@ pub struct NeuralNetConfig<F: FieldExt> {
     input: Column<Instance>,
     output: Column<Instance>,
     range_table: DecompTable<F, 1024>,
-    layers: Vec<ForwardLayerConfig<F, ReluChip<F, 1024>>>,
+    layers: Vec<ForwardLayerConfig<F, NormalizeChip<F, 1024, 2>, 4, 4>>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct NNCircuit<F: FieldExt> {
     pub layers: Vec<LayerParams<F>>,
     pub input: Vec<F>,
@@ -52,7 +51,7 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
             })
             .collect();
 
-        const DECOMP_COMPONENTS: usize = 11;
+        const DECOMP_COMPONENTS: usize = 15;
         let elt_advices: Vec<Column<Advice>> = (0..=DECOMP_COMPONENTS + 2)
             .map(|_| {
                 let col = meta.advice_column();
@@ -61,32 +60,34 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
             })
             .collect();
 
-        const MATRICES: [(usize, usize); 2] = [(4, 4), (4, 4)];
-
         let range_table = DecompTable::configure(meta);
 
-        let relu_chip = ReluChip::construct(ReluChip::configure(
+        let relu_chip = NormalizeChip::construct(NormalizeChip::configure(
             meta,
             elt_advices[0],
             elt_advices[1..elt_advices.len() - 1].into(),
-            elt_advices[elt_advices.len()-1],
+            elt_advices[elt_advices.len() - 1],
             range_table.clone(),
         ));
 
-        let layers = MATRICES
-            .iter()
-            .map(|matrix| {
-                ForwardLayerChip::configure(
-                    meta,
-                    mat_advices[0],
-                    mat_advices[1..matrix.1 + 1].into(),
-                    mat_advices[mat_advices.len() - 2],
-                    mat_advices[mat_advices.len() - 1],
-                    relu_chip.clone(),
-                    [matrix.0, matrix.1],
-                )
-            })
-            .collect();
+        let layers = vec![
+            ForwardLayerChip::configure(
+                meta,
+                mat_advices[0],
+                mat_advices[1..4 + 1].try_into().unwrap(),
+                mat_advices[mat_advices.len() - 2],
+                mat_advices[mat_advices.len() - 1],
+                relu_chip.clone(),
+            ),
+            ForwardLayerChip::configure(
+                meta,
+                mat_advices[0],
+                mat_advices[1..4 + 1].try_into().unwrap(),
+                mat_advices[mat_advices.len() - 2],
+                mat_advices[mat_advices.len() - 1],
+                relu_chip.clone(),
+            ),
+        ];
 
         NeuralNetConfig {
             input,
@@ -108,7 +109,7 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
         let layers: Vec<_> = config
             .layers
             .into_iter()
-            .map(|config| ForwardLayerChip::<F, ReluChip<F, 1024>>::construct(config))
+            .map(|config| ForwardLayerChip::construct(config))
             .collect();
         let input = layers[0].load_input_instance(
             layouter.namespace(|| "Load input from constant"),
