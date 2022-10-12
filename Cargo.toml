@@ -17,6 +17,7 @@ criterion = "0.3"
 
 [features]
 dhat-heap = ["dep:dhat"]
+mock = []
 
 [profile.release]
 debug=1

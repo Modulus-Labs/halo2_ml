@@ -38,12 +38,13 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         const MAX_MAT_WIDTH: usize = 4;
+        const INPUT_WIDTH: usize = 4;
         let input = meta.instance_column();
         meta.enable_equality(input);
         let output = meta.instance_column();
         meta.enable_equality(output);
 
-        let mat_advices: Vec<Column<Advice>> = (0..MAX_MAT_WIDTH + 3)
+        let mat_advices: Vec<Column<Advice>> = (0..MAX_MAT_WIDTH + INPUT_WIDTH + 2)
             .map(|_| {
                 let col = meta.advice_column();
                 meta.enable_equality(col);
@@ -73,16 +74,16 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
         let layers = vec![
             ForwardLayerChip::configure(
                 meta,
-                mat_advices[0],
-                mat_advices[1..4 + 1].try_into().unwrap(),
+                mat_advices[0..INPUT_WIDTH].try_into().unwrap(),
+                mat_advices[INPUT_WIDTH..INPUT_WIDTH+4].try_into().unwrap(),
                 mat_advices[mat_advices.len() - 2],
                 mat_advices[mat_advices.len() - 1],
                 relu_chip.clone(),
             ),
             ForwardLayerChip::configure(
                 meta,
-                mat_advices[0],
-                mat_advices[1..4 + 1].try_into().unwrap(),
+                mat_advices[0..INPUT_WIDTH].try_into().unwrap(),
+                mat_advices[INPUT_WIDTH..INPUT_WIDTH+4].try_into().unwrap(),
                 mat_advices[mat_advices.len() - 2],
                 mat_advices[mat_advices.len() - 1],
                 relu_chip.clone(),

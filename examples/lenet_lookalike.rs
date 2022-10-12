@@ -61,7 +61,7 @@ impl<F: FieldExt> Circuit<F> for LenetCircuit<F> {
         let output = meta.instance_column();
         meta.enable_equality(output);
 
-        let mat_advices: Vec<Column<Advice>> = (0..MAX_MAT_WIDTH + 3)
+        let mat_advices: Vec<Column<Advice>> = (0..(2*MAX_MAT_WIDTH) + 2)
             .map(|_| {
                 let col = meta.advice_column();
                 meta.enable_equality(col);
@@ -100,8 +100,8 @@ impl<F: FieldExt> Circuit<F> for LenetCircuit<F> {
 
         let layer_1 = ForwardLayerChip::configure(
             meta,
-            mat_advices[0].clone(),
-            mat_advices[1..DIMS[0][0] + 1].try_into().unwrap(),
+            mat_advices[0..DIMS[0][0]].try_into().unwrap(),
+            mat_advices[DIMS[0][0]..(2*DIMS[0][0])].try_into().unwrap(),
             mat_advices[mat_advices.len() - 2].clone(),
             mat_advices[mat_advices.len() - 1].clone(),
             norm_chip.clone(),
@@ -110,8 +110,8 @@ impl<F: FieldExt> Circuit<F> for LenetCircuit<F> {
 
         let layer_2 = ForwardLayerChip::configure(
             meta,
-            mat_advices[0].clone(),
-            mat_advices[1..DIMS[1][0] + 1].try_into().unwrap(),
+            mat_advices[0..DIMS[1][0]].try_into().unwrap(),
+            mat_advices[DIMS[1][0]..(2*DIMS[1][0])].try_into().unwrap(),
             mat_advices[mat_advices.len() - 2].clone(),
             mat_advices[mat_advices.len() - 1].clone(),
             norm_chip.clone(),
@@ -120,8 +120,8 @@ impl<F: FieldExt> Circuit<F> for LenetCircuit<F> {
 
         let layer_3 = ForwardLayerChip::configure(
             meta,
-            mat_advices[0].clone(),
-            mat_advices[1..DIMS[2][0] + 1].try_into().unwrap(),
+            mat_advices[0..DIMS[2][0]].try_into().unwrap(),
+            mat_advices[DIMS[2][0]..(2*DIMS[2][0])].try_into().unwrap(),
             mat_advices[mat_advices.len() - 2].clone(),
             mat_advices[mat_advices.len() - 1].clone(),
             relu_chip.clone(),
@@ -130,8 +130,8 @@ impl<F: FieldExt> Circuit<F> for LenetCircuit<F> {
 
         let layer_4 = ForwardLayerChip::configure(
             meta,
-            mat_advices[0],
-            mat_advices[1..DIMS[3][0] + 1].try_into().unwrap(),
+            mat_advices[0..DIMS[3][0]].try_into().unwrap(),
+            mat_advices[DIMS[3][0]..(2*DIMS[3][0])].try_into().unwrap(),
             mat_advices[mat_advices.len() - 2],
             mat_advices[mat_advices.len() - 1],
             relu_chip.clone(),
@@ -140,8 +140,8 @@ impl<F: FieldExt> Circuit<F> for LenetCircuit<F> {
 
         let layer_5 = ForwardLayerChip::configure(
             meta,
-            mat_advices[0],
-            mat_advices[1..DIMS[4][0] + 1].try_into().unwrap(),
+            mat_advices[0..DIMS[4][0]].try_into().unwrap(),
+            mat_advices[DIMS[4][0]..(2*DIMS[4][0])].try_into().unwrap(),
             mat_advices[mat_advices.len() - 2],
             mat_advices[mat_advices.len() - 1],
             norm_chip.clone(),
@@ -241,33 +241,41 @@ fn main() -> () {
         input: input.clone(),
     };
 
-    // MockProver::run(11, &circuit, vec![input.clone(), output.clone()])
-    //     .unwrap()
-    //     .assert_satisfied();
+    #[cfg(feature = "mock")]
+    {
+        let now = Instant::now();
 
-    // println!("Mock prover is satisfied in {:?}", now.elapsed().as_secs());
+        MockProver::run(11, &circuit, vec![input.clone(), output.clone()])
+            .unwrap()
+            .assert_satisfied();
 
-    let params = Params::<EqAffine>::new(11);
+        println!("Mock prover is satisfied in {:?}", now.elapsed().as_secs());
+    }
 
-    let vk = keygen_vk(&params, &circuit).unwrap();
+    #[cfg(not(feature = "mock"))]
+    {
+        let params = Params::<EqAffine>::new(11);
 
-    let pk = keygen_pk(&params, vk, &circuit).unwrap();
+        let vk = keygen_vk(&params, &circuit).unwrap();
 
-    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+        let pk = keygen_pk(&params, vk, &circuit).unwrap();
 
-    let now = Instant::now();
+        let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
 
-    create_proof(
-        &params,
-        &pk,
-        &[circuit],
-        &[&[input.as_slice(), output.as_slice()]],
-        OsRng,
-        &mut transcript,
-    )
-    .unwrap();
+        let now = Instant::now();
 
-    println!("Proof took {:?}", now.elapsed().as_secs());
+        create_proof(
+            &params,
+            &pk,
+            &[circuit],
+            &[&[input.as_slice(), output.as_slice()]],
+            OsRng,
+            &mut transcript,
+        )
+        .unwrap();
+
+        println!("Proof took {:?}", now.elapsed().as_secs());
+    }
 
     #[cfg(feature = "dhat-heap")]
     {
@@ -278,8 +286,8 @@ fn main() -> () {
 
 fn get_inputs() -> (Vec<Fp>, Vec<LayerParams<Fp>>, Vec<Fp>) {
     let inputs_raw = std::fs::read_to_string(
-        "/home/aweso/halo2_machinelearning/network_inputs/lenet_lookalike_micro.json",
-        //"/home/ubuntu/lenet_lookalike_micro.json",
+        //"/home/aweso/halo2_machinelearning/network_inputs/lenet_lookalike_micro.json",
+        "/home/ubuntu/lenet_lookalike_micro.json",
     )
     .unwrap();
     let inputs = json::parse(&inputs_raw).unwrap();

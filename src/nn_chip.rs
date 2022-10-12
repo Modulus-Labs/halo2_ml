@@ -28,7 +28,7 @@ pub struct ForwardLayerConfig<
 > {
     pub weights: [Column<Advice>; WIDTH],
     pub bias: Column<Advice>,
-    pub input: Column<Advice>,
+    pub inputs: [Column<Advice>; WIDTH],
     pub output: Column<Advice>,
     pub eltwise: Elt,
     // pub eltwise_inter: Vec<Column<Advice>>,
@@ -114,47 +114,54 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         //layer: ForwardLayerConfig<F, BASE, Elt>,
-        input: Column<Advice>,
+        inputs: [Column<Advice>; WIDTH],
         weights: [Column<Advice>; WIDTH],
         bias: Column<Advice>,
         output: Column<Advice>,
         elt_chip: Elt,
     ) -> <Self as Chip<F>>::Config {
         let nn_selector = meta.selector();
-        meta.create_gate("affine", |meta| {
+        meta.create_gate("FC", |meta| {
             let q = meta.query_selector(nn_selector);
             let out_dim = HEIGHT;
             // We put the negation of the claimed output in the constraint tensor.
-            let constraints: Vec<Expression<F>> = (0..out_dim)
-                .map(|i| -meta.query_advice(output, Rotation(i as i32)))
+            // let constraints: Vec<Expression<F>> = (0..out_dim)
+            //     .map(|i| -meta.query_advice(output, Rotation(i as i32)))
+            //     .collect();
+
+            let output = -meta.query_advice(output, Rotation::cur());
+
+            let inputs: Vec<(Expression<F>, Expression<F>)> = (0..WIDTH)
+                .map(|index| (meta.query_advice(inputs[index], Rotation::cur()), meta.query_advice(weights[index], Rotation::cur())))
                 .collect();
 
-            let inputs: Vec<Expression<F>> = (0..WIDTH)
-                .map(|index| meta.query_advice(input, Rotation(index as i32)))
-                .collect();
+            let bias = meta.query_advice(bias, Rotation::cur());
 
             // Now we compute the linear expression,  and add it to constraints
-            let constraints: Vec<Expression<F>> = constraints
-                .iter()
-                .enumerate()
-                .map(|item| {
-                    let i = item.0;
-                    let mut c = item.1.clone();
-                    for j in 0..WIDTH {
-                        c = c + meta.query_advice(weights[j], Rotation(i as i32))
-                            * inputs[j].clone();
-                    }
-                    // add the bias
-                    q.clone() * (c + meta.query_advice(bias, Rotation(i as i32)))
-                })
-                .collect();
-            constraints
+            // let constraints: Vec<Expression<F>> = constraints
+            //     .iter()
+            //     .enumerate()
+            //     .map(|item| {
+            //         let i = item.0;
+            //         let mut c = item.1.clone();
+            //         for j in 0..WIDTH {
+            //             c = c + meta.query_advice(weights[j], Rotation(i as i32))
+            //                 * inputs[j].clone();
+            //         }
+            //         // add the bias
+            //         q.clone() * (c + meta.query_advice(bias, Rotation(i as i32)))
+            //     })
+            //     .collect();
+            let constraint = inputs.into_iter().fold(Expression::Constant(F::zero()), |accum, (input, weight)| {
+                accum+(input*weight)
+            });
+            vec![q*(constraint + bias + output)]
         });
         //}
         // let eltwise_config =
         //     Elt::configure(meta, output, eltwise_inter, eltwise_output, range_table);
         ForwardLayerConfig {
-            input,
+            inputs,
             weights,
             bias,
             output,
@@ -190,8 +197,8 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
                         region
                             .assign_advice_from_constant(
                                 || "NN input from constant",
-                                config.input,
-                                i,
+                                config.inputs[i],
+                                0,
                                 *item,
                             )
                             .map(Number)
@@ -216,7 +223,7 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
                     .enumerate()
                     .map(|(i, item)| {
                         region
-                            .assign_advice(|| "NN input from advice", config.input, i, || *item)
+                            .assign_advice(|| "NN input from advice", config.inputs[i], 0, || *item)
                             .map(Number)
                     })
                     .collect()
@@ -242,8 +249,8 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
                             || "NN input from instance",
                             instance,
                             starting_row + iii,
-                            config.input,
-                            iii,
+                            config.inputs[iii],
+                            0,
                         )
                     })
                     .collect()
@@ -264,8 +271,6 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
             |mut region| {
                 // let layer_outputs: Result<Vec<_>, PlonkError> =
                 let offset = 0;
-
-                config.nn_selector.enable(&mut region, offset).unwrap();
 
                 //assign parameters (weights+biases)
                 let (biases, weights): (Vec<_>, Vec<_>) = ({
@@ -307,10 +312,6 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
                 let mat_output: Vec<AssignedCell<Assigned<F>, F>> = {
                     let out_dim = HEIGHT;
 
-                    for (i, x) in input.iter().enumerate() {
-                        x.copy_advice(|| "input", &mut region, config.input, offset + i)?;
-                    }
-
                     // calculate value of output
                     let output: Vec<Value<Assigned<F>>> = (0..out_dim)
                         .map(|i| {
@@ -322,16 +323,19 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
                         })
                         .collect();
 
-                    let output: Vec<AssignedCell<Assigned<F>, F>> = output
+                    let output: Result<Vec<AssignedCell<Assigned<F>, F>>, _> = output
                         .iter()
                         .enumerate()
                         .map(|(i, o)| {
+                            config.nn_selector.enable(&mut region, offset+1).unwrap();
+                            for (j, x) in input.iter().enumerate() {
+                                x.copy_advice(|| "input", &mut region, config.inputs[j], offset+i)?;
+                            }        
                             region
                                 .assign_advice(|| "o".to_string(), config.output, offset + i, || *o)
-                                .unwrap()
                         })
                         .collect();
-                    output
+                    output?
                 };
 
                 Ok(mat_output)
