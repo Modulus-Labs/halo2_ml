@@ -123,7 +123,6 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
         let nn_selector = meta.selector();
         meta.create_gate("FC", |meta| {
             let q = meta.query_selector(nn_selector);
-            let out_dim = HEIGHT;
             // We put the negation of the claimed output in the constraint tensor.
             // let constraints: Vec<Expression<F>> = (0..out_dim)
             //     .map(|i| -meta.query_advice(output, Rotation(i as i32)))

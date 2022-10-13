@@ -7,22 +7,21 @@ use halo2_machinelearning::{
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{Layouter, SimpleFloorPlanner},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance, SingleVerifier}, transcript::Blake2bRead,
 };
-use nn_ops::eltwise_ops::{NormalizeReluChip, ReluChip};
+use nn_ops::eltwise_ops::{NormalizeReluChip};
 
 use halo2_machinelearning::nn_ops::lookup_ops::DecompTable;
 
 use halo2_proofs::{
-    dev::MockProver,
     pasta::{EqAffine, Fp},
-    plonk::{create_proof, keygen_pk, keygen_vk},
+    plonk::{create_proof, keygen_pk, keygen_vk, verify_proof},
     poly::commitment::Params,
     transcript::{Blake2bWrite, Challenge255},
 };
 use rand::rngs::OsRng;
 
-const DIMS: [[usize; 2]; 5] = [[256, 216], [216, 200], [200, 120], [120, 84], [84, 10]];
+const DIMS: [[usize; 2]; 5] = [[784, 2400], [2400, 200], [200, 120], [120, 84], [84, 10]];
 
 #[derive(Clone, Debug)]
 ///Config for Neural Net Chip
@@ -31,8 +30,8 @@ pub struct LenetConfig<F: FieldExt> {
     output: Column<Instance>,
     range_table: DecompTable<F, 1024>,
     //layers: Vec<ForwardLayerConfig<F, NormalizeReluChip<F, 1024, 2>, 16, 16>>,
-    layer_1: ForwardLayerConfig<F, NormalizeChip<F, 1024, 2>, 256, 216>,
-    layer_2: ForwardLayerConfig<F, NormalizeChip<F, 1024, 2>, 216, 200>,
+    layer_1: ForwardLayerConfig<F, NormalizeChip<F, 1024, 2>, 784, 2400>,
+    layer_2: ForwardLayerConfig<F, NormalizeChip<F, 1024, 2>, 2400, 200>,
     layer_3: ForwardLayerConfig<F, NormalizeReluChip<F, 1024, 2>, 200, 120>,
     layer_4: ForwardLayerConfig<F, NormalizeReluChip<F, 1024, 2>, 120, 84>,
     layer_5: ForwardLayerConfig<F, NormalizeChip<F, 1024, 2>, 84, 10>,
@@ -55,7 +54,7 @@ impl<F: FieldExt> Circuit<F> for LenetCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        const MAX_MAT_WIDTH: usize = 256;
+        const MAX_MAT_WIDTH: usize = 2400;
         let input = meta.instance_column();
         meta.enable_equality(input);
         let output = meta.instance_column();
@@ -234,6 +233,8 @@ fn main() -> () {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::builder().testing().build();
 
+    let k = 12;
+
     let (input, layers, output) = get_inputs();
 
     let circuit = LenetCircuit::<Fp> {
@@ -243,22 +244,35 @@ fn main() -> () {
 
     #[cfg(feature = "mock")]
     {
+        use halo2_proofs::dev::MockProver;
         let now = Instant::now();
 
-        MockProver::run(11, &circuit, vec![input.clone(), output.clone()])
+        MockProver::run(k, &circuit, vec![input.clone(), output.clone()])
             .unwrap()
             .assert_satisfied();
 
         println!("Mock prover is satisfied in {:?}", now.elapsed().as_secs());
+
+        #[cfg(feature = "dev-graph")]
+        {
+        use plotters::prelude::*;
+
+        let root = BitMapBackend::new("inner_product.png", (1024, 3096)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let root = root.titled("inner product", ("sans-serif", 60)).unwrap();
+        halo2_proofs::dev::CircuitLayout::default()
+        .render(k, &circuit, &root)
+        .unwrap();
+        }
     }
 
     #[cfg(not(feature = "mock"))]
     {
-        let params = Params::<EqAffine>::new(11);
+        let params = Params::<EqAffine>::new(k);
 
         let vk = keygen_vk(&params, &circuit).unwrap();
 
-        let pk = keygen_pk(&params, vk, &circuit).unwrap();
+        let pk = keygen_pk(&params, vk.clone(), &circuit).unwrap();
 
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
 
@@ -275,6 +289,16 @@ fn main() -> () {
         .unwrap();
 
         println!("Proof took {:?}", now.elapsed().as_secs());
+
+        let proof = transcript.finalize();
+        //println!("{:?}", proof);
+        let now = Instant::now();
+        let strategy = SingleVerifier::new(&params);
+        let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+
+        assert!(verify_proof(&params, &vk, strategy, &[&[input.as_slice(), output.as_slice()]], &mut transcript).is_ok());
+
+        println!("Verification took {}", now.elapsed().as_secs());
     }
 
     #[cfg(feature = "dhat-heap")]
@@ -286,8 +310,8 @@ fn main() -> () {
 
 fn get_inputs() -> (Vec<Fp>, Vec<LayerParams<Fp>>, Vec<Fp>) {
     let inputs_raw = std::fs::read_to_string(
-        //"/home/aweso/halo2_machinelearning/network_inputs/lenet_lookalike_micro.json",
-        "/home/ubuntu/lenet_lookalike_micro.json",
+        //"/home/aweso/halo2_machinelearning/network_inputs/4_lenet_lookalike_test.json",
+        "/home/ubuntu/halo2_benches/network_inputs/1_lenet_lookalike_test.json",
     )
     .unwrap();
     let inputs = json::parse(&inputs_raw).unwrap();

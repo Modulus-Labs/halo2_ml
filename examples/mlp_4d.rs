@@ -17,7 +17,10 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 fn main() -> () {
     #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::builder().testing().build();
+    {
+        let _profiler = dhat::Profiler::builder().testing().build();
+        println!("profiling!");
+    }
 
     let layers = vec![
         LayerParams {
@@ -54,35 +57,35 @@ fn main() -> () {
         input: input.clone(),
     };
 
-    MockProver::run(11, &circuit, vec![input, output])
-        .unwrap()
-        .assert_satisfied();
+    // MockProver::run(11, &circuit, vec![input, output])
+    //     .unwrap()
+    //     .assert_satisfied();
 
-    // let params = Params::<EqAffine>::new(11);
+    let params = Params::<EqAffine>::new(11);
 
-    // let vk = keygen_vk(&params, &circuit).unwrap();
+    let vk = keygen_vk(&params, &circuit).unwrap();
 
-    // let pk = keygen_pk(&params, vk, &circuit).unwrap();
+    let pk = keygen_pk(&params, vk, &circuit).unwrap();
 
-    // let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
 
-    // let now = Instant::now();
+    let now = Instant::now();
 
-    // create_proof(
-    //     &params,
-    //     &pk,
-    //     &[circuit],
-    //     &[&[input.as_slice(), output.as_slice()]],
-    //     OsRng,
-    //     &mut transcript,
-    // )
-    // .unwrap();
+    create_proof(
+        &params,
+        &pk,
+        &[circuit],
+        &[&[input.as_slice(), output.as_slice()]],
+        OsRng,
+        &mut transcript,
+    )
+    .unwrap();
 
-    // println!("Proof took {:?}", now.elapsed().as_secs());
+    println!("Proof took {:?}", now.elapsed().as_secs());
 
-    // #[cfg(feature = "dhat-heap")]
-    // {
-    // let stats = dhat::HeapStats::get();
-    // println!("{:?}", stats.max_bytes);
-    // }
+    #[cfg(feature = "dhat-heap")]
+    {
+    let stats = dhat::HeapStats::get();
+    println!("{:?}", stats.max_bytes);
+    }
 }

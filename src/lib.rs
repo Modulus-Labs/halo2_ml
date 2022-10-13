@@ -7,7 +7,7 @@ use halo2_proofs::{
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance},
 };
 use nn_chip::{ForwardLayerChip, ForwardLayerConfig, LayerParams, NNLayerInstructions};
-use nn_ops::eltwise_ops::{NormalizeChip, NormalizeReluChip, ReluChip};
+use nn_ops::eltwise_ops::{NormalizeChip};
 
 use crate::nn_ops::lookup_ops::DecompTable;
 
