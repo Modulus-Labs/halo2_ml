@@ -70,7 +70,7 @@ impl<F: FieldExt, const BASE: usize> ReluChip<F, BASE> {
 
         //range check with lookup table for all words items
         for item in eltwise_inter.clone() {
-            meta.lookup(|meta| {
+            meta.lookup("lookup",|meta| {
                 let s_elt = meta.query_selector(selector);
                 let word = meta.query_advice(item, Rotation::cur());
                 vec![(s_elt * word, range_table.range_check_table)]
@@ -272,7 +272,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeChip<F, BASE, K> {
 
         //range check with lookup table for all words items
         for item in eltwise_inter.clone() {
-            meta.lookup(|meta| {
+            meta.lookup("lookup", |meta| {
                 let s_elt = meta.query_selector(selector);
                 let word = meta.query_advice(item, Rotation::cur());
                 vec![(s_elt * word, range_table.range_check_table)]
@@ -496,7 +496,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeReluChip<F, BASE, 
 
         //range check with lookup table for all words items
         for item in eltwise_inter.clone() {
-            meta.lookup(|meta| {
+            meta.lookup("lookup",|meta| {
                 let s_elt = meta.query_selector(selector);
                 let word = meta.query_advice(item, Rotation::cur());
                 vec![(s_elt * word, range_table.range_check_table)]

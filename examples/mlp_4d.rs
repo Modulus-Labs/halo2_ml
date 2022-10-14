@@ -1,10 +1,10 @@
 use halo2_machinelearning::{nn_chip::LayerParams, NNCircuit};
 use halo2_proofs::{
     dev::MockProver,
-    pasta::{EqAffine, Fp},
+    halo2curves::{bn256::Bn256, bn256::Fr},
     plonk::{create_proof, keygen_pk, keygen_vk},
-    poly::commitment::Params,
-    transcript::{Blake2bWrite, Challenge255},
+    poly::{commitment::{Params, ParamsProver}, kzg::{commitment::ParamsKZG, multiopen::ProverSHPLONK}},
+    transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},
 };
 
 use std::time::Instant;
@@ -17,10 +17,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 fn main() -> () {
     #[cfg(feature = "dhat-heap")]
-    {
-        let _profiler = dhat::Profiler::builder().testing().build();
-        println!("profiling!");
-    }
+    let _profiler = dhat::Profiler::builder().testing().build();
 
     let layers = vec![
         LayerParams {
@@ -28,31 +25,31 @@ fn main() -> () {
                 .into_iter()
                 .map(|x: i64| {
                     if x >= 0 {
-                        Fp::from(x.unsigned_abs())
+                        Fr::from(x.unsigned_abs())
                     } else {
-                        -Fp::from(x.unsigned_abs())
+                        -Fr::from(x.unsigned_abs())
                     }
                 })
                 .collect(),
             biases: vec![1_099_511_627_776; 4]
                 .into_iter()
-                .map(|x| Fp::from(x))
+                .map(|x| Fr::from(x))
                 .collect(),
         },
         LayerParams {
-            weights: vec![1048576; 16].into_iter().map(|x| Fp::from(x)).collect(),
+            weights: vec![1048576; 16].into_iter().map(|x| Fr::from(x)).collect(),
             biases: vec![1_099_511_627_776; 4]
                 .into_iter()
-                .map(|x| Fp::from(x))
+                .map(|x| Fr::from(x))
                 .collect(),
         },
     ];
 
-    let input: Vec<Fp> = vec![1048576; 4].into_iter().map(|x| Fp::from(x)).collect();
+    let input: Vec<Fr> = vec![1048576; 4].into_iter().map(|x| Fr::from(x)).collect();
 
-    let output: Vec<Fp> = vec![22020096; 4].into_iter().map(|x| Fp::from(x)).collect();
+    let output: Vec<Fr> = vec![22020096; 4].into_iter().map(|x| Fr::from(x)).collect();
 
-    let circuit = NNCircuit::<Fp> {
+    let circuit = NNCircuit::<Fr> {
         layers,
         input: input.clone(),
     };
@@ -61,7 +58,7 @@ fn main() -> () {
     //     .unwrap()
     //     .assert_satisfied();
 
-    let params = Params::<EqAffine>::new(11);
+    let params: ParamsKZG<Bn256> = ParamsProver::new(11);
 
     let vk = keygen_vk(&params, &circuit).unwrap();
 
@@ -71,7 +68,7 @@ fn main() -> () {
 
     let now = Instant::now();
 
-    create_proof(
+    create_proof::<_, ProverSHPLONK<Bn256>, _, _, _, _>(
         &params,
         &pk,
         &[circuit],
