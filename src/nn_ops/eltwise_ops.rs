@@ -1,4 +1,4 @@
-use std::{fmt::Debug, marker::PhantomData};
+use std::{fmt::Debug, hash::Hash, marker::PhantomData};
 
 use halo2_proofs::{
     arithmetic::FieldExt,
@@ -12,18 +12,24 @@ use halo2_proofs::{
 
 use super::lookup_ops::DecompTable;
 
-pub trait EltwiseInstructions<F: FieldExt>: Clone + Debug {
+pub trait EltwiseInstructions<F: FieldExt>: Clone + Debug + Chip<F> {
     ///apply the eltwise operation to an `AssignedCell`
     fn apply_elt(
         &self,
         layouter: impl Layouter<F>,
         input: AssignedCell<F, F>,
     ) -> Result<AssignedCell<F, F>, PlonkError>;
+
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        format!("{:?}", self).hash(state);
+    }
+
+    fn construct(config: DecompConfig<F>) -> Self;
 }
 
 ///Eltwise Op for RELU
 #[derive(Clone, Debug)]
-pub struct ReluConfig<F: FieldExt, const BASE: usize> {
+pub struct DecompConfig<F: FieldExt> {
     bit_sign: Column<Advice>,
     decomp: Vec<Column<Advice>>,
     input: Column<Advice>,
@@ -34,11 +40,11 @@ pub struct ReluConfig<F: FieldExt, const BASE: usize> {
 
 #[derive(Clone, Debug)]
 pub struct ReluChip<F: FieldExt, const BASE: usize> {
-    config: ReluConfig<F, BASE>,
+    config: DecompConfig<F>,
 }
 
 impl<F: FieldExt, const BASE: usize> Chip<F> for ReluChip<F, BASE> {
-    type Config = ReluConfig<F, BASE>;
+    type Config = DecompConfig<F>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -53,7 +59,7 @@ impl<F: FieldExt, const BASE: usize> Chip<F> for ReluChip<F, BASE> {
 impl<F: FieldExt, const BASE: usize> ReluChip<F, BASE> {
     const ADVICE_LEN: usize = 15;
 
-    pub fn construct(config: <Self as Chip<F>>::Config) -> Self {
+    pub fn construct(config: DecompConfig<F>) -> Self {
         Self { config }
     }
 
@@ -63,14 +69,14 @@ impl<F: FieldExt, const BASE: usize> ReluChip<F, BASE> {
         mut eltwise_inter: Vec<Column<Advice>>,
         eltwise_output: Column<Advice>,
         range_table: DecompTable<F, BASE>,
-    ) -> ReluConfig<F, BASE> {
+    ) -> DecompConfig<F> {
         let selector = meta.complex_selector();
 
         let bit_sign_col = eltwise_inter.remove(0);
 
         //range check with lookup table for all words items
         for item in eltwise_inter.clone() {
-            meta.lookup("lookup",|meta| {
+            meta.lookup("lookup", |meta| {
                 let s_elt = meta.query_selector(selector);
                 let word = meta.query_advice(item, Rotation::cur());
                 vec![(s_elt * word, range_table.range_check_table)]
@@ -112,7 +118,7 @@ impl<F: FieldExt, const BASE: usize> ReluChip<F, BASE> {
             expr.push(s_elt * ((bit_sign.clone()*(output.clone() - word_sum))+((constant_1 - bit_sign)*output)));
             expr
         });
-        ReluConfig {
+        DecompConfig {
             bit_sign: bit_sign_col,
             input,
             decomp: eltwise_inter,
@@ -124,6 +130,10 @@ impl<F: FieldExt, const BASE: usize> ReluChip<F, BASE> {
 }
 
 impl<F: FieldExt, const BASE: usize> EltwiseInstructions<F> for ReluChip<F, BASE> {
+    fn construct(config: DecompConfig<F>) -> Self {
+        Self { config }
+    }
+
     fn apply_elt(
         &self,
         mut layouter: impl Layouter<F>,
@@ -236,11 +246,11 @@ pub struct NormalizeConfig<F: FieldExt, const BASE: usize, const K: usize> {
 /// - division is by `BASE^K`
 #[derive(Clone, Debug)]
 pub struct NormalizeChip<F: FieldExt, const BASE: usize, const K: usize> {
-    config: NormalizeConfig<F, BASE, K>,
+    config: DecompConfig<F>,
 }
 
 impl<F: FieldExt, const BASE: usize, const K: usize> Chip<F> for NormalizeChip<F, BASE, K> {
-    type Config = NormalizeConfig<F, BASE, K>;
+    type Config = DecompConfig<F>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -255,7 +265,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> Chip<F> for NormalizeChip<F
 impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeChip<F, BASE, K> {
     const ADVICE_LEN: usize = 15;
 
-    pub fn construct(config: <Self as Chip<F>>::Config) -> Self {
+    pub fn construct(config: DecompConfig<F>) -> Self {
         Self { config }
     }
 
@@ -265,7 +275,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeChip<F, BASE, K> {
         mut eltwise_inter: Vec<Column<Advice>>,
         eltwise_output: Column<Advice>,
         range_table: DecompTable<F, BASE>,
-    ) -> NormalizeConfig<F, BASE, K> {
+    ) -> DecompConfig<F> {
         let selector = meta.complex_selector();
 
         let bit_sign_col = eltwise_inter.remove(0);
@@ -325,7 +335,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeChip<F, BASE, K> {
             expr.push(s_elt * ((bit_sign.clone()*(output.clone() - trunc_sum.clone()))+((constant_1 - bit_sign)*(output + trunc_sum))));
             expr
         });
-        NormalizeConfig {
+        DecompConfig {
             bit_sign: bit_sign_col,
             input,
             decomp: eltwise_inter,
@@ -339,6 +349,10 @@ impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeChip<F, BASE, K> {
 impl<F: FieldExt, const BASE: usize, const K: usize> EltwiseInstructions<F>
     for NormalizeChip<F, BASE, K>
 {
+    fn construct(config: DecompConfig<F>) -> Self {
+        Self { config }
+    }
+
     fn apply_elt(
         &self,
         mut layouter: impl Layouter<F>,
@@ -460,11 +474,11 @@ pub struct NormalizeReluConfig<F: FieldExt, const BASE: usize, const K: usize> {
 /// - division is by `BASE^K`
 #[derive(Clone, Debug)]
 pub struct NormalizeReluChip<F: FieldExt, const BASE: usize, const K: usize> {
-    config: NormalizeReluConfig<F, BASE, K>,
+    config: DecompConfig<F>,
 }
 
 impl<F: FieldExt, const BASE: usize, const K: usize> Chip<F> for NormalizeReluChip<F, BASE, K> {
-    type Config = NormalizeReluConfig<F, BASE, K>;
+    type Config = DecompConfig<F>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -479,7 +493,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> Chip<F> for NormalizeReluCh
 impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeReluChip<F, BASE, K> {
     const ADVICE_LEN: usize = 15;
 
-    pub fn construct(config: <Self as Chip<F>>::Config) -> Self {
+    pub fn construct(config: DecompConfig<F>) -> Self {
         Self { config }
     }
 
@@ -489,14 +503,14 @@ impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeReluChip<F, BASE, 
         mut eltwise_inter: Vec<Column<Advice>>,
         eltwise_output: Column<Advice>,
         range_table: DecompTable<F, BASE>,
-    ) -> NormalizeReluConfig<F, BASE, K> {
+    ) -> DecompConfig<F> {
         let selector = meta.complex_selector();
 
         let bit_sign_col = eltwise_inter.remove(0);
 
         //range check with lookup table for all words items
         for item in eltwise_inter.clone() {
-            meta.lookup("lookup",|meta| {
+            meta.lookup("lookup", |meta| {
                 let s_elt = meta.query_selector(selector);
                 let word = meta.query_advice(item, Rotation::cur());
                 vec![(s_elt * word, range_table.range_check_table)]
@@ -549,7 +563,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeReluChip<F, BASE, 
             expr.push(s_elt * ((bit_sign.clone()*(output.clone() - trunc_sum))+((constant_1 - bit_sign)*output)));
             expr
         });
-        NormalizeReluConfig {
+        DecompConfig {
             bit_sign: bit_sign_col,
             input,
             decomp: eltwise_inter,
@@ -563,6 +577,10 @@ impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeReluChip<F, BASE, 
 impl<F: FieldExt, const BASE: usize, const K: usize> EltwiseInstructions<F>
     for NormalizeReluChip<F, BASE, K>
 {
+    fn construct(config: DecompConfig<F>) -> Self {
+        Self { config }
+    }
+
     fn apply_elt(
         &self,
         mut layouter: impl Layouter<F>,

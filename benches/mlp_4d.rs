@@ -3,7 +3,10 @@ use halo2_proofs::{
     dev::MockProver,
     halo2curves::{bn256::Bn256, bn256::Fr},
     plonk::{create_proof, keygen_pk, keygen_vk},
-    poly::{commitment::{Params, ParamsProver}, kzg::{commitment::ParamsKZG, multiopen::ProverSHPLONK}},
+    poly::{
+        commitment::{Params, ParamsProver},
+        kzg::{commitment::ParamsKZG, multiopen::ProverSHPLONK},
+    },
     transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},
 };
 
@@ -11,7 +14,7 @@ use std::time::Instant;
 
 use rand::rngs::OsRng;
 
-use criterion::{criterion_group, criterion_main, Criterion, black_box};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn mlp_4d(c: &mut Criterion) -> () {
     let layers = vec![

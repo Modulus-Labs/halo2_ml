@@ -60,7 +60,7 @@ impl<F: FieldExt> Circuit<F> for RockyCircuit<F> {
         let output = meta.instance_column();
         meta.enable_equality(output);
 
-        let mat_advices: Vec<Column<Advice>> = (0..(2*MAX_MAT_WIDTH) + 2)
+        let mat_advices: Vec<Column<Advice>> = (0..(2 * MAX_MAT_WIDTH) + 2)
             .map(|_| {
                 let col = meta.advice_column();
                 meta.enable_equality(col);
@@ -102,7 +102,9 @@ impl<F: FieldExt> Circuit<F> for RockyCircuit<F> {
         let layer_1 = ForwardLayerChip::configure(
             meta,
             mat_advices[0..DIMS[0][0]].try_into().unwrap(),
-            mat_advices[DIMS[0][0]..(2*DIMS[0][0])].try_into().unwrap(),
+            mat_advices[DIMS[0][0]..(2 * DIMS[0][0])]
+                .try_into()
+                .unwrap(),
             mat_advices[mat_advices.len() - 2].clone(),
             mat_advices[mat_advices.len() - 1].clone(),
             relu_chip.clone(),
@@ -113,7 +115,9 @@ impl<F: FieldExt> Circuit<F> for RockyCircuit<F> {
         let layer_2 = ForwardLayerChip::configure(
             meta,
             mat_advices[0..DIMS[1][0]].try_into().unwrap(),
-            mat_advices[DIMS[1][0]..(2*DIMS[1][0])].try_into().unwrap(),
+            mat_advices[DIMS[1][0]..(2 * DIMS[1][0])]
+                .try_into()
+                .unwrap(),
             mat_advices[mat_advices.len() - 2].clone(),
             mat_advices[mat_advices.len() - 1].clone(),
             relu_chip.clone(),
@@ -124,7 +128,9 @@ impl<F: FieldExt> Circuit<F> for RockyCircuit<F> {
         let layer_3 = ForwardLayerChip::configure(
             meta,
             mat_advices[0..DIMS[2][0]].try_into().unwrap(),
-            mat_advices[DIMS[2][0]..(2*DIMS[2][0])].try_into().unwrap(),
+            mat_advices[DIMS[2][0]..(2 * DIMS[2][0])]
+                .try_into()
+                .unwrap(),
             mat_advices[mat_advices.len() - 2].clone(),
             mat_advices[mat_advices.len() - 1].clone(),
             norm_chip.clone(),
@@ -173,9 +179,12 @@ impl<F: FieldExt> Circuit<F> for RockyCircuit<F> {
 
         println!("layouted layer 1!");
 
-        let _: Vec<_> = input_l2.iter().map(|x| {
-            println!("layer 1 outputs: {:?}", x.value());
-        }).collect();
+        let _: Vec<_> = input_l2
+            .iter()
+            .map(|x| {
+                println!("layer 1 outputs: {:?}", x.value());
+            })
+            .collect();
 
         let input_l3 = l2.add_layers(
             layouter.namespace(|| format!("NN Layer 2")),
@@ -185,9 +194,12 @@ impl<F: FieldExt> Circuit<F> for RockyCircuit<F> {
 
         println!("layouted layer 2!");
 
-        let _: Vec<_> = input_l3.iter().map(|x| {
-            println!("layer 2 outputs: {:?}", x.value());
-        }).collect();
+        let _: Vec<_> = input_l3
+            .iter()
+            .map(|x| {
+                println!("layer 2 outputs: {:?}", x.value());
+            })
+            .collect();
 
         let output = l3.add_layers(
             layouter.namespace(|| format!("NN Layer 3")),

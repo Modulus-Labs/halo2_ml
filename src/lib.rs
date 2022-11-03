@@ -7,7 +7,7 @@ use halo2_proofs::{
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance},
 };
 use nn_chip::{ForwardLayerChip, ForwardLayerConfig, LayerParams, NNLayerInstructions};
-use nn_ops::eltwise_ops::{NormalizeChip};
+use nn_ops::eltwise_ops::{NormalizeChip, NormalizeReluChip};
 
 use crate::nn_ops::lookup_ops::DecompTable;
 
@@ -17,7 +17,7 @@ pub struct NeuralNetConfig<F: FieldExt> {
     input: Column<Instance>,
     output: Column<Instance>,
     range_table: DecompTable<F, 1024>,
-    layers: Vec<ForwardLayerConfig<F, NormalizeChip<F, 1024, 2>, 4, 4>>,
+    layers: Vec<ForwardLayerConfig<F>>,
 }
 
 #[derive(Default, Clone)]
@@ -63,27 +63,35 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
 
         let range_table = DecompTable::configure(meta);
 
-        let relu_chip = NormalizeChip::construct(NormalizeChip::configure(
+        let relu_chip = NormalizeChip::<F, 1024, 2>::configure(
             meta,
             elt_advices[0],
             elt_advices[1..elt_advices.len() - 1].into(),
             elt_advices[elt_advices.len() - 1],
             range_table.clone(),
-        ));
+        );
 
         let layers = vec![
-            ForwardLayerChip::configure(
+            ForwardLayerChip::<_, NormalizeChip<F, 1024, 2>>::configure(
                 meta,
+                INPUT_WIDTH,
+                4,
                 mat_advices[0..INPUT_WIDTH].try_into().unwrap(),
-                mat_advices[INPUT_WIDTH..INPUT_WIDTH+4].try_into().unwrap(),
+                mat_advices[INPUT_WIDTH..INPUT_WIDTH + 4]
+                    .try_into()
+                    .unwrap(),
                 mat_advices[mat_advices.len() - 2],
                 mat_advices[mat_advices.len() - 1],
                 relu_chip.clone(),
             ),
-            ForwardLayerChip::configure(
+            ForwardLayerChip::<_, NormalizeChip<F, 1024, 2>>::configure(
                 meta,
+                INPUT_WIDTH,
+                4,
                 mat_advices[0..INPUT_WIDTH].try_into().unwrap(),
-                mat_advices[INPUT_WIDTH..INPUT_WIDTH+4].try_into().unwrap(),
+                mat_advices[INPUT_WIDTH..INPUT_WIDTH + 4]
+                    .try_into()
+                    .unwrap(),
                 mat_advices[mat_advices.len() - 2],
                 mat_advices[mat_advices.len() - 1],
                 relu_chip.clone(),
@@ -110,7 +118,7 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
         let layers: Vec<_> = config
             .layers
             .into_iter()
-            .map(|config| ForwardLayerChip::construct(config))
+            .map(|config| ForwardLayerChip::<_, NormalizeReluChip<F, 1024, 2>>::construct(config))
             .collect();
         let input = layers[0].load_input_instance(
             layouter.namespace(|| "Load input from constant"),

@@ -1,4 +1,4 @@
-use std::{fmt::Debug, marker::PhantomData};
+use std::{fmt::Debug, hash::Hash, marker::PhantomData};
 
 use halo2_proofs::{
     arithmetic::FieldExt,
@@ -10,7 +10,7 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
-use crate::nn_ops::eltwise_ops::EltwiseInstructions;
+use crate::nn_ops::eltwise_ops::{DecompConfig, EltwiseInstructions};
 
 //TODO: move somehwere more appropriate
 #[derive(Default, Clone)]
@@ -20,17 +20,14 @@ pub struct LayerParams<F: FieldExt> {
 }
 
 #[derive(Clone, Debug)]
-pub struct ForwardLayerConfig<
-    F: FieldExt,
-    Elt: EltwiseInstructions<F>,
-    const WIDTH: usize,
-    const HEIGHT: usize,
-> {
-    pub weights: [Column<Advice>; WIDTH],
+pub struct ForwardLayerConfig<F: FieldExt> {
+    pub width: usize,
+    pub height: usize,
+    pub weights: Vec<Column<Advice>>,
     pub bias: Column<Advice>,
-    pub inputs: [Column<Advice>; WIDTH],
+    pub inputs: Vec<Column<Advice>>,
     pub output: Column<Advice>,
-    pub eltwise: Elt,
+    pub eltwise: DecompConfig<F>,
     // pub eltwise_inter: Vec<Column<Advice>>,
     // pub eltwise_output: Column<Advice>,
     pub nn_selector: Selector,
@@ -39,22 +36,20 @@ pub struct ForwardLayerConfig<
 }
 
 ///Instructions that allow NN Chip to be used
-pub trait NNLayerInstructions<F: FieldExt>: Chip<F> {
-    type Num;
-
+pub trait NNLayerInstructions<F: FieldExt> {
     ///Loads inputs from constant
     fn load_input_constant(
         &self,
         layouter: impl Layouter<F>,
         input: &[F],
-    ) -> Result<Vec<Self::Num>, PlonkError>;
+    ) -> Result<Vec<AssignedCell<F, F>>, PlonkError>;
 
     ///Loads inputs from advice
     fn load_input_advice(
         &self,
         layouter: impl Layouter<F>,
         input: Vec<Value<F>>,
-    ) -> Result<Vec<Self::Num>, PlonkError>;
+    ) -> Result<Vec<AssignedCell<F, F>>, PlonkError>;
 
     ///Loads inputs from instance
     fn load_input_instance(
@@ -76,20 +71,13 @@ pub trait NNLayerInstructions<F: FieldExt>: Chip<F> {
 
 #[derive(Clone, Debug)]
 ///Chip to prove NeuralNet operations
-pub struct ForwardLayerChip<
-    F: FieldExt,
-    Elt: EltwiseInstructions<F>,
-    const WIDTH: usize,
-    const HEIGHT: usize,
-> {
-    config: ForwardLayerConfig<F, Elt, WIDTH, HEIGHT>,
+pub struct ForwardLayerChip<F: FieldExt, Elt: EltwiseInstructions<F>> {
+    config: ForwardLayerConfig<F>,
     _marker: PhantomData<(F, Elt)>,
 }
 
-impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT: usize> Chip<F>
-    for ForwardLayerChip<F, Elt, WIDTH, HEIGHT>
-{
-    type Config = ForwardLayerConfig<F, Elt, WIDTH, HEIGHT>;
+impl<F: FieldExt, Elt: EltwiseInstructions<F>> Chip<F> for ForwardLayerChip<F, Elt> {
+    type Config = ForwardLayerConfig<F>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -101,9 +89,7 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
     }
 }
 
-impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT: usize>
-    ForwardLayerChip<F, Elt, WIDTH, HEIGHT>
-{
+impl<F: FieldExt, Elt: EltwiseInstructions<F>> ForwardLayerChip<F, Elt> {
     pub fn construct(config: <Self as Chip<F>>::Config) -> Self {
         Self {
             config,
@@ -113,12 +99,14 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
 
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
+        width: usize,
+        height: usize,
         //layer: ForwardLayerConfig<F, BASE, Elt>,
-        inputs: [Column<Advice>; WIDTH],
-        weights: [Column<Advice>; WIDTH],
+        inputs: &[Column<Advice>],
+        weights: &[Column<Advice>],
         bias: Column<Advice>,
         output: Column<Advice>,
-        elt_chip: Elt,
+        elt_config: DecompConfig<F>,
     ) -> <Self as Chip<F>>::Config {
         let nn_selector = meta.selector();
         meta.create_gate("FC", |meta| {
@@ -130,8 +118,13 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
 
             let output = -meta.query_advice(output, Rotation::cur());
 
-            let inputs: Vec<(Expression<F>, Expression<F>)> = (0..WIDTH)
-                .map(|index| (meta.query_advice(inputs[index], Rotation::cur()), meta.query_advice(weights[index], Rotation::cur())))
+            let inputs: Vec<(Expression<F>, Expression<F>)> = (0..width)
+                .map(|index| {
+                    (
+                        meta.query_advice(inputs[index], Rotation::cur()),
+                        meta.query_advice(weights[index], Rotation::cur()),
+                    )
+                })
                 .collect();
 
             let bias = meta.query_advice(bias, Rotation::cur());
@@ -151,20 +144,24 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
             //         q.clone() * (c + meta.query_advice(bias, Rotation(i as i32)))
             //     })
             //     .collect();
-            let constraint = inputs.into_iter().fold(Expression::Constant(F::zero()), |accum, (input, weight)| {
-                accum+(input*weight)
-            });
-            vec![q*(constraint + bias + output)]
+            let constraint = inputs
+                .into_iter()
+                .fold(Expression::Constant(F::zero()), |accum, (input, weight)| {
+                    accum + (input * weight)
+                });
+            vec![q * (constraint + bias + output)]
         });
         //}
         // let eltwise_config =
         //     Elt::configure(meta, output, eltwise_inter, eltwise_output, range_table);
         ForwardLayerConfig {
-            inputs,
-            weights,
+            width,
+            height,
+            inputs: inputs.to_vec(),
+            weights: weights.to_vec(),
             bias,
             output,
-            eltwise: elt_chip,
+            eltwise: elt_config,
             nn_selector,
             _marker: PhantomData,
         }
@@ -174,16 +171,12 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
 #[derive(Clone, Debug)]
 pub struct Number<F: FieldExt>(pub AssignedCell<F, F>);
 
-impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT: usize>
-    NNLayerInstructions<F> for ForwardLayerChip<F, Elt, WIDTH, HEIGHT>
-{
-    type Num = Number<F>;
-
+impl<F: FieldExt, Elt: EltwiseInstructions<F>> NNLayerInstructions<F> for ForwardLayerChip<F, Elt> {
     fn load_input_constant(
         &self,
         mut layouter: impl Layouter<F>,
         input: &[F],
-    ) -> Result<Vec<Self::Num>, PlonkError> {
+    ) -> Result<Vec<AssignedCell<F, F>>, PlonkError> {
         let config = self.config();
 
         layouter.assign_region(
@@ -193,14 +186,12 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
                     .iter()
                     .enumerate()
                     .map(|(i, item)| {
-                        region
-                            .assign_advice_from_constant(
-                                || "NN input from constant",
-                                config.inputs[i],
-                                0,
-                                *item,
-                            )
-                            .map(Number)
+                        region.assign_advice_from_constant(
+                            || "NN input from constant",
+                            config.inputs[i],
+                            0,
+                            *item,
+                        )
                     })
                     .collect()
             },
@@ -211,7 +202,7 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
         &self,
         mut layouter: impl Layouter<F>,
         input: Vec<Value<F>>,
-    ) -> Result<Vec<Self::Num>, PlonkError> {
+    ) -> Result<Vec<AssignedCell<F, F>>, PlonkError> {
         let config = self.config();
 
         layouter.assign_region(
@@ -221,9 +212,12 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
                     .iter()
                     .enumerate()
                     .map(|(i, item)| {
-                        region
-                            .assign_advice(|| "NN input from advice", config.inputs[i], 0, || *item)
-                            .map(Number)
+                        region.assign_advice(
+                            || "NN input from advice",
+                            config.inputs[i],
+                            0,
+                            || *item,
+                        )
                     })
                     .collect()
             },
@@ -295,9 +289,9 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
                                 region.assign_advice(
                                     || "assigning weights".to_string(),
                                     // row indices
-                                    config.weights[iii % WIDTH],
+                                    config.weights[iii % config.width],
                                     // columns indices
-                                    offset + (iii / WIDTH),
+                                    offset + (iii / config.width),
                                     || Value::known(*weight),
                                 )
                             })
@@ -309,14 +303,15 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
 
                 //calculate output and assign it to layer output
                 let mat_output: Vec<AssignedCell<Assigned<F>, F>> = {
-                    let out_dim = HEIGHT;
+                    let out_dim = config.height;
 
                     // calculate value of output
                     let output: Vec<Value<Assigned<F>>> = (0..out_dim)
                         .map(|i| {
                             let mut o: Value<Assigned<F>> = Value::known(F::zero().into());
                             for (j, x) in input.iter().enumerate() {
-                                o = o + weights[j + (i * WIDTH)].value_field() * x.value_field();
+                                o = o + weights[j + (i * config.width)].value_field()
+                                    * x.value_field();
                             }
                             o + biases[i].value_field()
                         })
@@ -326,12 +321,21 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
                         .iter()
                         .enumerate()
                         .map(|(i, o)| {
-                            config.nn_selector.enable(&mut region, offset+1).unwrap();
+                            config.nn_selector.enable(&mut region, offset + 1).unwrap();
                             for (j, x) in input.iter().enumerate() {
-                                x.copy_advice(|| "input", &mut region, config.inputs[j], offset+i)?;
-                            }        
-                            region
-                                .assign_advice(|| "o".to_string(), config.output, offset + i, || *o)
+                                x.copy_advice(
+                                    || "input",
+                                    &mut region,
+                                    config.inputs[j],
+                                    offset + i,
+                                )?;
+                            }
+                            region.assign_advice(
+                                || "o".to_string(),
+                                config.output,
+                                offset + i,
+                                || *o,
+                            )
                         })
                         .collect();
                     output?
@@ -341,13 +345,11 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>, const WIDTH: usize, const HEIGHT:
             },
         )?;
 
+        let elt_chip: Elt = Elt::construct(config.eltwise.clone());
+
         mat_output
             .into_iter()
-            .map(|out| {
-                config
-                    .eltwise
-                    .apply_elt(layouter.namespace(|| "elt"), out.evaluate())
-            })
+            .map(|out| elt_chip.apply_elt(layouter.namespace(|| "elt"), out.evaluate()))
             .collect()
     }
 }

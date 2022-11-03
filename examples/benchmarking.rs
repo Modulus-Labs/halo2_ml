@@ -1,4 +1,5 @@
-use std::time::Instant;
+#![feature(adt_const_params)]
+use std::{collections::HashMap, time::Instant};
 
 use halo2_machinelearning::{
     nn_chip::{ForwardLayerChip, ForwardLayerConfig, LayerParams, NNLayerInstructions},
@@ -6,10 +7,10 @@ use halo2_machinelearning::{
 };
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{Chip, Layouter, SimpleFloorPlanner},
+    circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance},
     poly::{
-        commitment::{Params, ParamsProver, ParamsVerifier},
+        commitment::{ParamsProver},
         kzg::{
             commitment::ParamsKZG,
             multiopen::{ProverSHPLONK, VerifierSHPLONK},
@@ -29,18 +30,7 @@ use halo2_proofs::{
 };
 use rand::rngs::OsRng;
 
-const DIMS: [[usize; 2]; 10] = [
-    [100, 200],
-    [200, 100],
-    [100, 200],
-    [200, 100],
-    [100, 200],
-    [200, 100],
-    [100, 200],
-    [200, 100],
-    [100, 200],
-    [200, 100],
-];
+const BASE: usize = 1024;
 
 #[derive(Clone, Debug)]
 ///Config for Neural Net Chip
@@ -48,20 +38,22 @@ pub struct LenetConfig<F: FieldExt> {
     input: Column<Instance>,
     output: Column<Instance>,
     range_table: DecompTable<F, 1024>,
-    layers: Vec<Box<dyn NNLayerInstructions<F>>>,
-    layer_1: ForwardLayerConfig<F, NormalizeReluChip<F, 1024, 2>, 100, 200>,
-    layer_2: ForwardLayerConfig<F, NormalizeReluChip<F, 1024, 2>, 200, 100>,
-    layer_final: ForwardLayerConfig<F, NormalizeChip<F, 1024, 2>, 200, 100>,
+    //layers: Vec<ForwardLayerConfig<F, NormalizeReluChip<F, 1024, 2>, 16, 16>>,
+    layers: HashMap<(usize, usize, bool), ForwardLayerConfig<F>>,
 }
 
+const DEPTH: usize = 3;
+
+type NetworkArch = [(usize, usize, bool); DEPTH];
+
 #[derive(Default)]
-pub struct LenetCircuit<F: FieldExt> {
+pub struct LenetCircuit<F: FieldExt, const STRUCT: NetworkArch> {
     pub layers: Vec<LayerParams<F>>,
     pub input: Vec<F>,
     //_marker: PhantomData<&'a PhantomData<F>>,
 }
 
-impl<F: FieldExt> Circuit<F> for LenetCircuit<F> {
+impl<F: FieldExt, const NETWORK: NetworkArch> Circuit<F> for LenetCircuit<F, NETWORK> {
     type Config = LenetConfig<F>;
 
     type FloorPlanner = SimpleFloorPlanner;
@@ -71,6 +63,7 @@ impl<F: FieldExt> Circuit<F> for LenetCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+        //todo!()
         const MAX_MAT_WIDTH: usize = 200;
         let input = meta.instance_column();
         meta.enable_equality(input);
@@ -94,91 +87,68 @@ impl<F: FieldExt> Circuit<F> for LenetCircuit<F> {
             })
             .collect();
 
-        let range_table = DecompTable::configure(meta);
+        let range_table: DecompTable<F, BASE> = DecompTable::configure(meta);
 
-        let relu_chip = NormalizeReluChip::construct(NormalizeReluChip::configure(
+        let relu_chip = NormalizeReluChip::<_, BASE, 2>::configure(
             meta,
             elt_advices[0].clone(),
             elt_advices[1..elt_advices.len() - 1].into(),
             elt_advices[elt_advices.len() - 1].clone(),
             range_table.clone(),
-        ));
+        );
 
-        let norm_chip = NormalizeChip::construct(NormalizeChip::configure(
+        let norm_chip = NormalizeChip::<_, BASE, 2>::configure(
             meta,
             elt_advices[0],
             elt_advices[1..elt_advices.len() - 1].into(),
             elt_advices[elt_advices.len() - 1],
             range_table.clone(),
-        ));
-
-        let layer_1 = ForwardLayerChip::configure(
-            meta,
-            mat_advices[0..DIMS[0][0]].try_into().unwrap(),
-            mat_advices[DIMS[0][0]..(2 * DIMS[0][0])]
-                .try_into()
-                .unwrap(),
-            mat_advices[mat_advices.len() - 2].clone(),
-            mat_advices[mat_advices.len() - 1].clone(),
-            relu_chip.clone(),
         );
 
-        let layer_2 = ForwardLayerChip::configure(
-            meta,
-            mat_advices[0..DIMS[1][0]].try_into().unwrap(),
-            mat_advices[DIMS[1][0]..(2 * DIMS[1][0])]
-                .try_into()
-                .unwrap(),
-            mat_advices[mat_advices.len() - 2].clone(),
-            mat_advices[mat_advices.len() - 1].clone(),
-            relu_chip.clone(),
-        );
+        let mut layers = HashMap::new();
 
-        let layer_final = ForwardLayerChip::configure(
-            meta,
-            mat_advices[0..DIMS[1][0]].try_into().unwrap(),
-            mat_advices[DIMS[1][0]..(2 * DIMS[1][0])]
-                .try_into()
-                .unwrap(),
-            mat_advices[mat_advices.len() - 2].clone(),
-            mat_advices[mat_advices.len() - 1].clone(),
-            norm_chip.clone(),
-        );
-
-        // let layer_3 = ForwardLayerChip::configure(
-        //     meta,
-        //     mat_advices[0..DIMS[2][0]].try_into().unwrap(),
-        //     mat_advices[DIMS[2][0]..(2*DIMS[2][0])].try_into().unwrap(),
-        //     mat_advices[mat_advices.len() - 2].clone(),
-        //     mat_advices[mat_advices.len() - 1].clone(),
-        //     relu_chip.clone(),
-        // );
-
-        // let layer_4 = ForwardLayerChip::configure(
-        //     meta,
-        //     mat_advices[0..DIMS[3][0]].try_into().unwrap(),
-        //     mat_advices[DIMS[3][0]..(2*DIMS[3][0])].try_into().unwrap(),
-        //     mat_advices[mat_advices.len() - 2],
-        //     mat_advices[mat_advices.len() - 1],
-        //     relu_chip.clone(),
-        // );
-
-        // let layer_5 = ForwardLayerChip::configure(
-        //     meta,
-        //     mat_advices[0..DIMS[4][0]].try_into().unwrap(),
-        //     mat_advices[DIMS[4][0]..(2*DIMS[4][0])].try_into().unwrap(),
-        //     mat_advices[mat_advices.len() - 2],
-        //     mat_advices[mat_advices.len() - 1],
-        //     relu_chip.clone(),
-        // );
+        for key in NETWORK {
+            if !layers.contains_key(&key) {
+                let (width, height, relu) = key;
+                if relu {
+                    layers.insert(
+                        key,
+                        ForwardLayerChip::<F, NormalizeReluChip<F, BASE, 2>>::configure(
+                            meta,
+                            width,
+                            height,
+                            &mat_advices[0..width],
+                            &mat_advices[width..(2 * width)],
+                            mat_advices[mat_advices.len() - 2].clone(),
+                            mat_advices[mat_advices.len() - 1].clone(),
+                            relu_chip.clone(),
+                        ),
+                    );
+                } else {
+                    layers.insert(
+                        key,
+                        ForwardLayerChip::<_, NormalizeChip<F, BASE, 2>>::configure(
+                            meta,
+                            width,
+                            height,
+                            mat_advices[0..width].try_into().unwrap(),
+                            mat_advices[width..(2 * width)]
+                                .try_into()
+                                .unwrap(),
+                            mat_advices[mat_advices.len() - 2].clone(),
+                            mat_advices[mat_advices.len() - 1].clone(),
+                            norm_chip.clone(),
+                        ),
+                    );
+                }
+            }
+        }
 
         LenetConfig {
             input,
             output,
             range_table,
-            layer_1,
-            layer_2,
-            layer_final,
+            layers,
         }
     }
 
@@ -187,85 +157,33 @@ impl<F: FieldExt> Circuit<F> for LenetCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), PlonkError> {
-        const LAYER_COUNT: usize = 40;
         config
             .range_table
             .layout(layouter.namespace(|| "range check lookup table"))?;
 
-        let l1 = ForwardLayerChip::construct(config.layer_1);
-        let l2 = ForwardLayerChip::construct(config.layer_2);
-        let lfinal = ForwardLayerChip::construct(config.layer_final);
-        let mut input = l1.load_input_instance(
-            layouter.namespace(|| "Load input from constant"),
-            config.input,
-            0,
-            self.input.len(),
-        )?;
-
-        let mut add_layer_pair = |n, x| {
-            let next = l1.add_layers(
-                layouter.namespace(|| format!("NN Layer {n}")),
-                x,
-                &self.layers[n],
-            )?;
-            l2.add_layers(
-                layouter.namespace(|| format!("NN Layer {:?}", n + 1)),
-                next,
-                &self.layers[n + 1],
-            )
-        };
-
-        for n in (0..LAYER_COUNT - 2).step_by(2) {
-            input = add_layer_pair(n, input)?;
+        let mut input: Option<Vec<AssignedCell<F, F>>> = None;
+        for (index, (key, layer)) in NETWORK.iter().zip(self.layers.iter()).enumerate() {
+            let (_, _, relu) = key;
+            input = if *relu {
+                let chip = ForwardLayerChip::<_, NormalizeReluChip<F, BASE, 2>>::construct(config.layers.get(&key).unwrap().clone());
+                let inter = input.unwrap_or(chip.load_input_instance(layouter.namespace(|| "Load input from instance"), config.input, 0, self.input.len())?);
+                let inter = chip.add_layers(layouter.namespace(|| format!("running layer {}; definintion: {:?}", index, key)), inter, layer)?;
+                Some(inter)
+            }
+            else {
+                let chip = ForwardLayerChip::<_, NormalizeChip<F, BASE, 2>>::construct(config.layers.get(&key).unwrap().clone());
+                let inter = input.unwrap_or(chip.load_input_instance(layouter.namespace(|| "Load input from instance"), config.input, 0, self.input.len())?);
+                let inter = chip.add_layers(layouter.namespace(|| format!("running layer {}; definintion: {:?}", index, key)), inter, layer)?;
+                Some(inter)
+            }
         }
 
-        input = l1.add_layers(
-            layouter.namespace(|| format!("NN Layer 9")),
-            input,
-            &self.layers[LAYER_COUNT - 2],
-        )?;
-
-        input = lfinal.add_layers(
-            layouter.namespace(|| format!("NN Layer final")),
-            input,
-            &self.layers[LAYER_COUNT - 1],
-        )?;
-
-        // let input_l2 = l1.add_layers(
-        //     layouter.namespace(|| format!("NN Layer 1")),
-        //     input,
-        //     &self.layers[0],
-        // )?;
-
-        // let input_l3 = l2.add_layers(
-        //     layouter.namespace(|| format!("NN Layer 2")),
-        //     input_l2,
-        //     &self.layers[1],
-        // )?;
-
-        // let input_l4 = l3.add_layers(
-        //     layouter.namespace(|| format!("NN Layer 3")),
-        //     input_l3,
-        //     &self.layers[2],
-        // )?;
-
-        // let input_l5 = l4.add_layers(
-        //     layouter.namespace(|| format!("NN Layer 4")),
-        //     input_l4,
-        //     &self.layers[3],
-        // )?;
-
-        // let output = l5.add_layers(
-        //     layouter.namespace(|| format!("NN Layer 5")),
-        //     input_l5,
-        //     &self.layers[4],
-        // )?;
-
-        for (index, cell) in input.into_iter().enumerate() {
+        for (index, cell) in input.unwrap().into_iter().enumerate() {
             layouter
                 .namespace(|| format!("contrain output at offset {index}"))
                 .constrain_instance(cell.cell(), config.output, index)?;
         }
+
         Ok(())
     }
 }
@@ -280,9 +198,11 @@ fn main() -> () {
 
     let k = 13;
 
-    let (input, layers, output) = get_inputs();
+    const NETWORK: NetworkArch = [(32, 100, true), (100, 200, true), (200, 100, false)];
 
-    let circuit = LenetCircuit::<Fr> {
+    let (input, layers, output) = get_inputs("FC_3_layers.json");
+
+    let circuit = LenetCircuit::<Fr, NETWORK> {
         layers,
         input: input.clone(),
     };
@@ -362,11 +282,10 @@ fn main() -> () {
     }
 }
 
-fn get_inputs() -> (Vec<Fr>, Vec<LayerParams<Fr>>, Vec<Fr>) {
-    let inputs_raw = std::fs::read_to_string(
-        //"/home/aweso/halo2_machinelearning/network_inputs/2_deep_test.json",
-        "/home/ubuntu/halo2_benches/network_inputs/2_deep_test.json",
-    )
+fn get_inputs(file_path: &str) -> (Vec<Fr>, Vec<LayerParams<Fr>>, Vec<Fr>) {
+    //const PREFIX: &str = "/home/aweso/halo2_machinelearning/bench_objects/";
+    const PREFIX: &str = "/home/ubuntu/halo2_benches_new/bench_objects/";
+    let inputs_raw = std::fs::read_to_string(PREFIX.to_owned() + file_path)
     .unwrap();
     let inputs = json::parse(&inputs_raw).unwrap();
     let input: Vec<_> = inputs["input"]
