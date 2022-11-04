@@ -321,7 +321,7 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> NNLayerInstructions<F> for Forwar
                         .iter()
                         .enumerate()
                         .map(|(i, o)| {
-                            config.nn_selector.enable(&mut region, offset + 1).unwrap();
+                            config.nn_selector.enable(&mut region, offset + i).unwrap();
                             for (j, x) in input.iter().enumerate() {
                                 x.copy_advice(
                                     || "input",
