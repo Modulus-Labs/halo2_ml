@@ -13,7 +13,7 @@ use halo2_proofs::{
 use crate::nn_ops::eltwise_ops::{DecompConfig, EltwiseInstructions};
 
 //TODO: move somehwere more appropriate
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct LayerParams<F: FieldExt> {
     pub weights: Vec<F>,
     pub biases: Vec<F>,

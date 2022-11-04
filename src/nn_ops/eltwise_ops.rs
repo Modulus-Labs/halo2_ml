@@ -20,10 +20,6 @@ pub trait EltwiseInstructions<F: FieldExt>: Clone + Debug + Chip<F> {
         input: AssignedCell<F, F>,
     ) -> Result<AssignedCell<F, F>, PlonkError>;
 
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        format!("{:?}", self).hash(state);
-    }
-
     fn construct(config: DecompConfig<F>) -> Self;
 }
 
