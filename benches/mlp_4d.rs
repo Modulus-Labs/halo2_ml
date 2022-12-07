@@ -5,7 +5,7 @@ use halo2_proofs::{
     plonk::{create_proof, keygen_pk, keygen_vk},
     poly::{
         commitment::{Params, ParamsProver},
-        kzg::{commitment::ParamsKZG, multiopen::ProverSHPLONK},
+        kzg::{commitment::ParamsKZG, multiopen::ProverSHPLONK, multiopen::ProverGWC},
     },
     transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},
 };
@@ -72,7 +72,7 @@ fn mlp_4d(c: &mut Criterion) -> () {
 
     c.bench_function("MLP_4d Real Prover", |b| {
         b.iter(|| {
-            create_proof::<_, ProverSHPLONK<Bn256>, _, _, _, _>(
+            create_proof::<_, ProverGWC<Bn256>, _, _, _, _>(
                 &params,
                 &pk,
                 &[circuit.clone()],

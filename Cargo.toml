@@ -8,7 +8,8 @@ edition = "2021"
 [dependencies]
 dhat = {version= "0.3.1", optional = true}
 # halo2_proofs = { git = "https://github.com/zcash/halo2.git", rev = "ac738ca5a143eb0389e73381967b5ab0280ed64e"}
-halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", rev = "a9e99a72a65d7c98e8a4258c2c94269c834d1c10"}
+#halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", rev = "a9e99a72a65d7c98e8a4258c2c94269c834d1c10"}
+halo2_proofs = {path = "../halo2_pse/halo2/halo2_proofs"}
 json = "0.12.4"
 plotters = {version = "0.3.4", optional = true}
 rand = "0.8.5"
@@ -23,8 +24,8 @@ dhat-heap = ["dep:dhat"]
 mock = []
 dev-graph = ["mock", "halo2_proofs/dev-graph", "dep:plotters"]
 
-[profile.release]
-debug=1
+#[profile.release]
+#debug=1
 
 [[bench]]
 name = "mlp_4d"

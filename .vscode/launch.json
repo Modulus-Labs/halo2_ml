@@ -1,0 +1,194 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'halo2_machinelearning'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=halo2_machinelearning"
+                ],
+                "filter": {
+                    "name": "halo2_machinelearning",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'benchmarking'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=benchmarking",
+                    "--package=halo2_machinelearning"
+                ],
+                "filter": {
+                    "name": "benchmarking",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'benchmarking'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=benchmarking",
+                    "--package=halo2_machinelearning"
+                ],
+                "filter": {
+                    "name": "benchmarking",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'rocky'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=rocky",
+                    "--package=halo2_machinelearning"
+                ],
+                "filter": {
+                    "name": "rocky",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'rocky'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=rocky",
+                    "--package=halo2_machinelearning"
+                ],
+                "filter": {
+                    "name": "rocky",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'mlp_4d'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=mlp_4d",
+                    "--package=halo2_machinelearning"
+                ],
+                "filter": {
+                    "name": "mlp_4d",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'mlp_4d'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=mlp_4d",
+                    "--package=halo2_machinelearning"
+                ],
+                "filter": {
+                    "name": "mlp_4d",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'lenet_lookalike'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=lenet_lookalike",
+                    "--package=halo2_machinelearning"
+                ],
+                "filter": {
+                    "name": "lenet_lookalike",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'lenet_lookalike'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=lenet_lookalike",
+                    "--package=halo2_machinelearning"
+                ],
+                "filter": {
+                    "name": "lenet_lookalike",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug benchmark 'mlp_4d'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bench=mlp_4d",
+                    "--package=halo2_machinelearning"
+                ],
+                "filter": {
+                    "name": "mlp_4d",
+                    "kind": "bench"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
