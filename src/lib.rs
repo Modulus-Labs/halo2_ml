@@ -1,5 +1,16 @@
+pub mod batchnorm;
+pub mod conv;
+pub mod dist_add;
+pub mod dist_addmultadd;
+pub mod dist_mul;
+pub mod norm_2d;
 pub mod nn_chip;
 pub mod nn_ops;
+pub mod sigmoid;
+pub mod sigmoid_2d;
+pub mod relu_2d;
+pub mod gather;
+pub mod avg_pool;
 
 use halo2_proofs::{
     arithmetic::FieldExt,
@@ -10,6 +21,14 @@ use nn_chip::{ForwardLayerChip, ForwardLayerConfig, LayerParams, NNLayerInstruct
 use nn_ops::eltwise_ops::{NormalizeChip, NormalizeReluChip};
 
 use crate::nn_ops::lookup_ops::DecompTable;
+
+pub fn felt_from_i64<F: FieldExt>(x: i64) -> F {
+    if x.is_positive() {
+        F::from(x.unsigned_abs())
+    } else {
+        F::from(x.unsigned_abs()).neg()
+    }
+}
 
 #[derive(Clone, Debug)]
 ///Config for Neural Net Chip
@@ -24,6 +43,7 @@ pub struct NeuralNetConfig<F: FieldExt> {
 pub struct NNCircuit<F: FieldExt> {
     pub layers: Vec<LayerParams<F>>,
     pub input: Vec<F>,
+    pub output: Vec<F>,
     //_marker: PhantomData<&'a PhantomData<F>>,
 }
 
@@ -142,5 +162,15 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
                 .constrain_instance(cell.cell(), config.output, index)?;
         }
         Ok(())
+    }
+}
+
+impl<F: FieldExt> NNCircuit<F> {
+    pub fn num_instances(&self) -> Vec<usize> {
+        vec![self.input.len(), self.output.len()]
+    }
+
+    pub fn instances(&self) -> Vec<Vec<F>> {
+        vec![self.input.clone(), self.output.clone()]
     }
 }

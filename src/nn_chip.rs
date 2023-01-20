@@ -15,8 +15,8 @@ use crate::nn_ops::eltwise_ops::{DecompConfig, EltwiseInstructions};
 //TODO: move somehwere more appropriate
 #[derive(Default, Clone, Debug)]
 pub struct LayerParams<F: FieldExt> {
-    pub weights: Vec<F>,
-    pub biases: Vec<F>,
+    pub weights: Vec<Value<F>>,
+    pub biases: Vec<Value<F>>,
 }
 
 #[derive(Clone, Debug)]
@@ -277,7 +277,7 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> NNLayerInstructions<F> for Forwar
                                     || "assigning biases".to_string(),
                                     config.bias,
                                     offset + index,
-                                    || Value::known(bias),
+                                    || bias,
                                 )
                             })
                             .collect(),
@@ -292,7 +292,7 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> NNLayerInstructions<F> for Forwar
                                     config.weights[iii % config.width],
                                     // columns indices
                                     offset + (iii / config.width),
-                                    || Value::known(*weight),
+                                    || *weight,
                                 )
                             })
                             .collect(),

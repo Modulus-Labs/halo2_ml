@@ -9,10 +9,22 @@ edition = "2021"
 dhat = {version= "0.3.1", optional = true}
 # halo2_proofs = { git = "https://github.com/zcash/halo2.git", rev = "ac738ca5a143eb0389e73381967b5ab0280ed64e"}
 #halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", rev = "a9e99a72a65d7c98e8a4258c2c94269c834d1c10"}
-halo2_proofs = {path = "../halo2_pse/halo2/halo2_proofs"}
+# halo2_proofs = {path = "../halo2_pse/halo2/halo2_proofs"}
+# halo2_proofs = { git = "https://github.com/scroll-tech/halo2.git", branch = "scroll-dev-0902" }
+halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2", tag = "v2022_10_22"}
+halo2_wrong_ecc = { git = "https://github.com/privacy-scaling-explorations/halo2wrong", tag = "v2022_10_22", package = "ecc" }
+halo2_curves = { git = "https://github.com/privacy-scaling-explorations/halo2curves", tag = "0.3.0", package = "halo2curves" }
+
+itertools = "0.10.5"
+
 json = "0.12.4"
+ndarray = "0.15.6"
 plotters = {version = "0.3.4", optional = true}
 rand = "0.8.5"
+
+# snark-verifier = {git = "https://github.com/privacy-scaling-explorations/snark-verifier.git"}
+
+snark-verifier = {path = "/home/aweso/modulus_labs/snark-verifier/snark-verifier"}
 
 [dev-dependencies]
 criterion = "0.3"
@@ -24,7 +36,7 @@ dhat-heap = ["dep:dhat"]
 mock = []
 dev-graph = ["mock", "halo2_proofs/dev-graph", "dep:plotters"]
 
-#[profile.release]
+[profile.release]
 #debug=1
 
 [[bench]]

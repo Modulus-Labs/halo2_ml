@@ -53,7 +53,7 @@ impl<F: FieldExt, const BASE: usize> Chip<F> for ReluChip<F, BASE> {
 }
 
 impl<F: FieldExt, const BASE: usize> ReluChip<F, BASE> {
-    const ADVICE_LEN: usize = 15;
+    const ADVICE_LEN: usize = 10;
 
     pub fn construct(config: DecompConfig<F>) -> Self {
         Self { config }
@@ -259,7 +259,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> Chip<F> for NormalizeChip<F
 }
 
 impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeChip<F, BASE, K> {
-    const ADVICE_LEN: usize = 15;
+    const ADVICE_LEN: usize = 10;
 
     pub fn construct(config: DecompConfig<F>) -> Self {
         Self { config }
@@ -487,7 +487,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> Chip<F> for NormalizeReluCh
 }
 
 impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeReluChip<F, BASE, K> {
-    const ADVICE_LEN: usize = 15;
+    const ADVICE_LEN: usize = 10;
 
     pub fn construct(config: DecompConfig<F>) -> Self {
         Self { config }

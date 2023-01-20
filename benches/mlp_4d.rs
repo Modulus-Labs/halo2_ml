@@ -1,11 +1,12 @@
 use halo2_machinelearning::{nn_chip::LayerParams, NNCircuit};
 use halo2_proofs::{
+    circuit::Value,
     dev::MockProver,
     halo2curves::{bn256::Bn256, bn256::Fr},
     plonk::{create_proof, keygen_pk, keygen_vk},
     poly::{
         commitment::{Params, ParamsProver},
-        kzg::{commitment::ParamsKZG, multiopen::ProverSHPLONK, multiopen::ProverGWC},
+        kzg::{commitment::ParamsKZG, multiopen::ProverGWC, multiopen::ProverSHPLONK},
     },
     transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},
 };
@@ -23,22 +24,25 @@ fn mlp_4d(c: &mut Criterion) -> () {
                 .into_iter()
                 .map(|x: i64| {
                     if x >= 0 {
-                        Fr::from(x.unsigned_abs())
+                        Value::known(Fr::from(x.unsigned_abs()))
                     } else {
-                        -Fr::from(x.unsigned_abs())
+                        Value::known(-Fr::from(x.unsigned_abs()))
                     }
                 })
                 .collect(),
             biases: vec![1_099_511_627_776; 4]
                 .into_iter()
-                .map(|x| Fr::from(x))
+                .map(|x| Value::known(Fr::from(x)))
                 .collect(),
         },
         LayerParams {
-            weights: vec![1048576; 16].into_iter().map(|x| Fr::from(x)).collect(),
+            weights: vec![1048576; 16]
+                .into_iter()
+                .map(|x| Value::known(Fr::from(x)))
+                .collect(),
             biases: vec![1_099_511_627_776; 4]
                 .into_iter()
-                .map(|x| Fr::from(x))
+                .map(|x| Value::known(Fr::from(x)))
                 .collect(),
         },
     ];
