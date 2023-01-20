@@ -4,13 +4,13 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
-        Advice, Assigned, Column, ConstraintSystem, Error as PlonkError, Expression, Instance,
+        Advice, Column, ConstraintSystem, Error as PlonkError, Expression,
         Selector,
     },
     poly::Rotation,
 };
 use ndarray::{
-    concatenate, stack, Array, Array1, Array2, Array3, Array4, ArrayBase, Axis, Dim, Zip,
+    concatenate, stack, Array, Array1, Array2, Array3, Array4, Axis, Zip,
 };
 
 #[derive(Clone, Debug)]
@@ -288,7 +288,7 @@ impl<F: FieldExt> Conv3DLayerChip<F> {
                         //place outputs
                         Ok(stack(
                             Axis(1),
-                            &outputs
+                            outputs
                                 .axis_iter(Axis(1))
                                 .enumerate()
                                 .map(|(row, outputs)| {
@@ -319,7 +319,7 @@ impl<F: FieldExt> Conv3DLayerChip<F> {
 
         Ok(stack(
             Axis(0),
-            &outputs
+            outputs
                 .iter()
                 .map(|x| x.view())
                 .collect::<Vec<_>>()
@@ -334,16 +334,14 @@ mod tests {
     use super::{Conv3DLayerChip, Conv3DLayerConfig};
     use halo2_proofs::{
         arithmetic::FieldExt,
-        circuit::{AssignedCell, Chip, Layouter, SimpleFloorPlanner, Value},
+        circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
         plonk::{
-            Advice, Assigned, Assignment, Circuit, Column, ConstraintSystem, Error as PlonkError,
-            Expression, Instance, Selector,
+            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
         },
-        poly::Rotation,
     };
-    use ndarray::{array, stack, Array, Array2, Array3, Array4, ArrayBase, Axis, Zip};
+    use ndarray::{stack, Array, Array2, Array3, Array4, Axis, Zip};
 
     #[derive(Clone, Debug)]
     struct ConvTestConfig<F: FieldExt> {
@@ -461,7 +459,7 @@ mod tests {
                                 Zip::from(slice.view())
                                     .and(input)
                                     .and(input_advice)
-                                    .map_collect(|input, instance, column| {
+                                    .map_collect(|_input, instance, column| {
                                         region
                                             .assign_advice_from_instance(
                                                 || "assign input",
@@ -511,8 +509,8 @@ mod tests {
             }),
         };
 
-        let output_width = INPUT_WIDTH + PADDING_WIDTH * 2 - KERNAL_WIDTH + 1;
-        let output_height = INPUT_HEIGHT + PADDING_HEIGHT * 2 - KERNAL_HEIGHT + 1;
+        let _output_width = INPUT_WIDTH + PADDING_WIDTH * 2 - KERNAL_WIDTH + 1;
+        let _output_height = INPUT_HEIGHT + PADDING_HEIGHT * 2 - KERNAL_HEIGHT + 1;
 
         let mut input_instance = vec![vec![Fr::one(); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
         //let mut output_instance = vec![vec![Fr::one(); output_height]; output_width*DEPTH];
@@ -547,7 +545,7 @@ mod tests {
             edge,
         ];
         let mut output_instance: Vec<_> =
-            vec![layer.clone(), layer.clone(), layer.clone(), layer.clone()]
+            vec![layer.clone(), layer.clone(), layer.clone(), layer]
                 .into_iter()
                 .flatten()
                 .collect();

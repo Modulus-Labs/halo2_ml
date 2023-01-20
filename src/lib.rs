@@ -114,7 +114,7 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
                     .unwrap(),
                 mat_advices[mat_advices.len() - 2],
                 mat_advices[mat_advices.len() - 1],
-                relu_chip.clone(),
+                relu_chip,
             ),
         ];
 

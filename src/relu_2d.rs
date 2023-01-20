@@ -4,14 +4,14 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
-        Advice, Assigned, Column, ConstraintSystem, Error as PlonkError, Expression, Instance,
+        Advice, Column, ConstraintSystem, Error as PlonkError, Expression,
         Selector,
     },
     poly::Rotation,
 };
 
 use ndarray::{
-    concatenate, stack, Array, Array1, Array2, Array3, Array4, ArrayBase, ArrayView, Axis, Dim, Zip,
+    stack, Array1, Array2, Axis,
 };
 
 use crate::nn_ops::lookup_ops::DecompTable;
@@ -121,9 +121,9 @@ impl<F: FieldExt, const BASE: usize, const K: usize> ReluNorm2dChip<F, BASE, K> 
                 expressions.push(
                     sel.clone()
                         * (bit_sign.clone() * (input.clone() - word_sum.clone())
-                            + (constant_1.clone() - bit_sign.clone()) * (input + word_sum.clone())),
+                            + (constant_1.clone() - bit_sign.clone()) * (input + word_sum)),
                 );
-                expressions.push(sel.clone() * ((bit_sign.clone()*(output.clone() - trunc_sum.clone()))+((constant_1 - bit_sign)*(output))));
+                expressions.push(sel.clone() * ((bit_sign.clone()*(output.clone() - trunc_sum))+((constant_1 - bit_sign)*(output))));
     
                 bit_signs.push(bit_sign_col);
 
@@ -270,7 +270,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> ReluNorm2dChip<F, BASE, K> 
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(stack(
                     Self::ROW_AXIS,
-                    &outputs
+                    outputs
                         .iter()
                         .map(|item| item.view())
                         .collect::<Vec<_>>()
@@ -289,16 +289,14 @@ mod tests {
     use super::{ReluNorm2dChip, ReluNorm2dConfig};
     use halo2_proofs::{
         arithmetic::FieldExt,
-        circuit::{AssignedCell, Chip, Layouter, SimpleFloorPlanner, Value},
+        circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
         plonk::{
-            Advice, Assigned, Assignment, Circuit, Column, ConstraintSystem, Error as PlonkError,
-            Expression, Instance, Selector,
+            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
         },
-        poly::Rotation,
     };
-    use ndarray::{array, stack, Array, Array1, Array2, Array3, Array4, ArrayBase, Axis, Zip};
+    use ndarray::{stack, Array, Array1, Array2, Axis, Zip};
 
     #[derive(Clone, Debug)]
     struct ReluNorm2DTestConfig<F: FieldExt> {
@@ -410,7 +408,7 @@ mod tests {
                                 Zip::from(slice.view())
                                     .and(input)
                                     .and(input_advice)
-                                    .map_collect(|input, instance, column| {
+                                    .map_collect(|_input, instance, column| {
                                         region
                                             .assign_advice_from_instance(
                                                 || "assign input",

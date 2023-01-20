@@ -4,13 +4,13 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
-        Advice, Assigned, Column, ConstraintSystem, Error as PlonkError, Expression, Instance,
+        Advice, Column, ConstraintSystem, Error as PlonkError, Expression,
         Selector,
     },
     poly::Rotation,
 };
 use ndarray::{
-    concatenate, stack, Array, Array1, Array2, Array3, Array4, ArrayBase, Axis, Dim, Zip,
+    Array1, Array3, Axis,
 };
 
 use crate::nn_ops::eltwise_ops::{DecompConfig, NormalizeChip, EltwiseInstructions};
@@ -138,16 +138,14 @@ mod tests {
     use super::{AvgPool2DChip, AvgPool2DConfig};
     use halo2_proofs::{
         arithmetic::FieldExt,
-        circuit::{AssignedCell, Chip, Layouter, SimpleFloorPlanner, Value},
+        circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
         plonk::{
-            Advice, Assigned, Assignment, Circuit, Column, ConstraintSystem, Error as PlonkError,
-            Expression, Instance, Selector,
+            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
         },
-        poly::Rotation,
     };
-    use ndarray::{array, stack, Array, Array2, Array3, Array4, ArrayBase, Axis, Zip};
+    use ndarray::{stack, Array, Array2, Array3, Axis, Zip};
 
     #[derive(Clone, Debug)]
     struct AvgPool2DTestConfig<F: FieldExt> {
@@ -273,7 +271,7 @@ mod tests {
                                 Zip::from(slice.view())
                                     .and(input)
                                     .and(input_advice)
-                                    .map_collect(|input, instance, column| {
+                                    .map_collect(|_input, instance, column| {
                                         region
                                             .assign_advice_from_instance(
                                                 || "assign input",

@@ -4,13 +4,11 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
-        Advice, Assigned, Column, ConstraintSystem, Error as PlonkError, Expression, Instance,
-        Selector,
+        Advice, Column, ConstraintSystem, Error as PlonkError,
     },
-    poly::Rotation,
 };
 use ndarray::{
-    concatenate, stack, Array, Array1, Array2, Array3, Array4, ArrayBase, Axis, Dim, Zip,
+    stack, Array1, Array2, Array3, Axis,
 };
 
 use crate::{

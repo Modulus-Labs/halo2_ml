@@ -1,6 +1,6 @@
 use halo2_machinelearning::{nn_chip::LayerParams, NNCircuit};
 use halo2_proofs::{circuit::Value, poly::commitment::CommitmentScheme};
-use std::time::Instant;
+
 
 use halo2_curves::bn256::{Bn256, Fq, Fr, G1Affine};
 use halo2_proofs::{
@@ -31,7 +31,7 @@ use snark_verifier::{
 use std::{io::Cursor, rc::Rc};
 
 use std::fs::File;
-use std::io::prelude::*;
+
 use std::io::Write;
 
 const LIMBS: usize = 4;
@@ -467,7 +467,7 @@ fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>)
 
     f.write_all(calldata.as_slice()).unwrap();
 
-    println!("call data is: {:?}", calldata);
+    println!("call data is: {calldata:?}");
     let success = {
         let mut evm = ExecutorBuilder::default()
             .with_gas_limit(u64::MAX.into())
@@ -514,7 +514,7 @@ fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>)
 //     evm_verify(deployment_code, agg_circuit.instances(), proof);
 // }
 
-fn main() -> () {
+fn main() {
     let layers = vec![
         LayerParams {
             weights: vec![1048576; 16]
@@ -544,14 +544,14 @@ fn main() -> () {
         },
     ];
 
-    let input: Vec<Fr> = vec![1048576; 4].into_iter().map(|x| Fr::from(x)).collect();
+    let input: Vec<Fr> = vec![1048576; 4].into_iter().map(Fr::from).collect();
 
-    let output: Vec<Fr> = vec![22020096; 4].into_iter().map(|x| Fr::from(x)).collect();
+    let output: Vec<Fr> = vec![22020096; 4].into_iter().map(Fr::from).collect();
 
     let circuit = NNCircuit::<Fr> {
         layers,
-        input: input.clone(),
-        output: output.clone(),
+        input: input,
+        output: output,
     };
 
     // MockProver::run(11, &circuit, vec![input, output])

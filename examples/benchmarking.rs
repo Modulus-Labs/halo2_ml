@@ -7,13 +7,13 @@ use halo2_machinelearning::{
 };
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{floor_planner::V1, AssignedCell, Layouter, SimpleFloorPlanner, Value},
+    circuit::{floor_planner::V1, AssignedCell, Layouter, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance},
     poly::{
         commitment::ParamsProver,
         kzg::{
             commitment::ParamsKZG,
-            multiopen::{ProverGWC, ProverSHPLONK, VerifierGWC, VerifierSHPLONK},
+            multiopen::{ProverSHPLONK, VerifierSHPLONK},
             strategy::SingleStrategy,
         },
     },
@@ -100,9 +100,9 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
 
         let relu_chip = NormalizeReluChip::<_, BASE, 2>::configure(
             meta,
-            elt_advices[0].clone(),
+            elt_advices[0],
             elt_advices[1..elt_advices.len() - 1].into(),
-            elt_advices[elt_advices.len() - 1].clone(),
+            elt_advices[elt_advices.len() - 1],
             range_table.clone(),
         );
 
@@ -128,8 +128,8 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
                             height,
                             &mat_advices[0..width],
                             &mat_advices[width..(2 * width)],
-                            mat_advices[mat_advices.len() - 2].clone(),
-                            mat_advices[mat_advices.len() - 1].clone(),
+                            mat_advices[mat_advices.len() - 2],
+                            mat_advices[mat_advices.len() - 1],
                             relu_chip.clone(),
                         ),
                     );
@@ -142,8 +142,8 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
                             height,
                             mat_advices[0..width].try_into().unwrap(),
                             mat_advices[width..(2 * width)].try_into().unwrap(),
-                            mat_advices[mat_advices.len() - 2].clone(),
-                            mat_advices[mat_advices.len() - 1].clone(),
+                            mat_advices[mat_advices.len() - 2],
+                            mat_advices[mat_advices.len() - 1],
                             norm_chip.clone(),
                         ),
                     );
@@ -164,7 +164,7 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), PlonkError> {
-        if self.layers.len() == 0 {
+        if self.layers.is_empty() {
             return Ok(());
         }
         config
@@ -176,7 +176,7 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
             let (_, _, relu) = key;
             input = if *relu {
                 let chip = ForwardLayerChip::<_, NormalizeReluChip<F, BASE, 2>>::construct(
-                    config.layers.get(&key).unwrap().clone(),
+                    config.layers.get(key).unwrap().clone(),
                 );
                 let inter = input.unwrap_or_else(|| {
                     chip.load_input_instance(
@@ -189,14 +189,14 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
                 });
                 let inter = chip.add_layers(
                     layouter
-                        .namespace(|| format!("running layer {}; definintion: {:?}", index, key)),
+                        .namespace(|| format!("running layer {index}; definintion: {key:?}")),
                     inter,
                     layer,
                 )?;
                 Some(inter)
             } else {
                 let chip = ForwardLayerChip::<_, NormalizeChip<F, BASE, 2>>::construct(
-                    config.layers.get(&key).unwrap().clone(),
+                    config.layers.get(key).unwrap().clone(),
                 );
                 let inter = input.unwrap_or_else(|| {
                     chip.load_input_instance(
@@ -209,7 +209,7 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
                 });
                 let inter = chip.add_layers(
                     layouter
-                        .namespace(|| format!("running layer {}; definintion: {:?}", index, key)),
+                        .namespace(|| format!("running layer {index}; definintion: {key:?}")),
                     inter,
                     layer,
                 )?;
@@ -235,7 +235,7 @@ fn bench_layer<const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize>(
     file_path: &str,
     k: u32,
 ) -> Result<(), PlonkError> {
-    println!("Benches for NN: {:?}", file_path);
+    println!("Benches for NN: {file_path:?}");
     println!("-------------");
 
     #[cfg(feature = "dhat-heap")]
@@ -305,7 +305,7 @@ fn bench_layer<const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize>(
 
         verify_proof::<_, VerifierSHPLONK<Bn256>, _, _, _>(
             &params,
-            &pk.get_vk(),
+            pk.get_vk(),
             strategy,
             &[&[input.as_slice(), output.as_slice()]],
             &mut transcript,

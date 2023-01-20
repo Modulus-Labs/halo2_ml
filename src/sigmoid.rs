@@ -4,21 +4,20 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
-        Advice, Assigned, Column, ConstraintSystem, Error as PlonkError, Expression, Instance,
+        Advice, Column, ConstraintSystem, Error as PlonkError, Expression,
         Selector,
     },
     poly::Rotation,
 };
 
 use ndarray::{
-    concatenate, stack, Array, Array1, Array2, Array3, Array4, ArrayBase, ArrayView, Axis, Dim, Zip,
+    Array, Array1, Axis,
 };
 
 use crate::{
-    norm_2d::{Normalize2dChip, Normalize2dConfig},
     felt_from_i64,
     nn_ops::{
-        eltwise_ops::{DecompConfig, EltwiseInstructions, NormalizeChip, NormalizeConfig},
+        eltwise_ops::{DecompConfig, EltwiseInstructions, NormalizeChip},
         lookup_ops::DecompTable,
     },
 };
@@ -134,7 +133,7 @@ impl<F: FieldExt, const BASE: usize> SigmoidChip<F, BASE> {
 
             let constant_1 = Expression::Constant(F::from(1));
 
-            vec![sel.clone() * (word_sum - ((comp_sign.clone() * (input.clone() - comp.clone())) + ((constant_1.clone()-comp_sign) * (comp - input))))]
+            vec![sel * (word_sum - ((comp_sign.clone() * (input.clone() - comp.clone())) + ((constant_1-comp_sign) * (comp - input))))]
         });
 
         meta.create_gate("Sigmoid 2D Output", |meta| -> Vec<Expression<F>> {
@@ -358,7 +357,6 @@ impl<F: FieldExt, const BASE: usize> SigmoidChip<F, BASE> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        norm_2d::Normalize2dChip,
         felt_from_i64,
         nn_ops::{eltwise_ops::NormalizeChip, lookup_ops::DecompTable},
     };
@@ -366,16 +364,14 @@ mod tests {
     use super::{SigmoidChip, SigmoidConfig};
     use halo2_proofs::{
         arithmetic::FieldExt,
-        circuit::{AssignedCell, Chip, Layouter, SimpleFloorPlanner, Value},
+        circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
         plonk::{
-            Advice, Assigned, Assignment, Circuit, Column, ConstraintSystem, Error as PlonkError,
-            Expression, Instance, Selector,
+            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
         },
-        poly::Rotation,
     };
-    use ndarray::{array, stack, Array, Array1, Array2, Array3, Array4, ArrayBase, Axis, Zip};
+    use ndarray::{Array, Array1, Zip};
 
     #[derive(Clone, Debug)]
     struct SigmoidTestConfig<F: FieldExt> {
@@ -436,7 +432,7 @@ mod tests {
 
             let norm_chip = NormalizeChip::<_, 1024, 2>::configure(
                 meta,
-                inputs.clone(),
+                inputs,
                 eltwise_inter.to_vec(),
                 outputs,
                 range_table.clone(),
@@ -492,7 +488,7 @@ mod tests {
                     self.input
                         .iter()
                         .enumerate()
-                        .map(|(row, input)| {
+                        .map(|(row, _input)| {
                             region.assign_advice_from_instance(
                                 || "assign input",
                                 input_col,
@@ -546,7 +542,7 @@ mod tests {
             input: Zip::from(input.view()).map_collect(|&input| Value::known(input)),
         };
 
-        let mut input_instance: Vec<_> = vec![input.to_vec(), output.to_vec()];
+        let input_instance: Vec<_> = vec![input.to_vec(), output.to_vec()];
 
         MockProver::run(11, &circuit, input_instance)
             .unwrap()

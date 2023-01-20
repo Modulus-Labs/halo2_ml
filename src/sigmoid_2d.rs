@@ -4,14 +4,14 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
-        Advice, Assigned, Column, ConstraintSystem, Error as PlonkError, Expression, Instance,
+        Advice, Column, ConstraintSystem, Error as PlonkError, Expression,
         Selector,
     },
     poly::Rotation,
 };
 
 use ndarray::{
-    concatenate, stack, Array, Array1, Array2, Array3, Array4, ArrayBase, ArrayView, Axis, Dim, Zip,
+    stack, Array1, Array2, Axis,
 };
 
 use crate::{
@@ -134,7 +134,7 @@ impl<F: FieldExt, const BASE: usize> Sigmoid2dChip<F, BASE> {
     
                 let constant_1 = Expression::Constant(F::from(1));
                 expressions.push(
-                    sel.clone() * (word_sum - ((comp_sign.clone() * (input.clone() - comp.clone())) + ((constant_1.clone()-comp_sign) * (comp - input))))
+                    sel.clone() * (word_sum - ((comp_sign.clone() * (input.clone() - comp.clone())) + ((constant_1-comp_sign) * (comp - input))))
                 );
 
                 comp_signs.push(comp_sign_col);
@@ -389,7 +389,7 @@ impl<F: FieldExt, const BASE: usize> Sigmoid2dChip<F, BASE> {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(stack(
                     Self::ROW_AXIS,
-                    &outputs
+                    outputs
                         .iter()
                         .map(|item| item.view())
                         .collect::<Vec<_>>()
@@ -411,16 +411,14 @@ mod tests {
     use super::{Sigmoid2dChip, Sigmoid2dConfig};
     use halo2_proofs::{
         arithmetic::FieldExt,
-        circuit::{AssignedCell, Chip, Layouter, SimpleFloorPlanner, Value},
+        circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
         plonk::{
-            Advice, Assigned, Assignment, Circuit, Column, ConstraintSystem, Error as PlonkError,
-            Expression, Instance, Selector,
+            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
         },
-        poly::Rotation,
     };
-    use ndarray::{array, stack, Array, Array1, Array2, Array3, Array4, ArrayBase, Axis, Zip};
+    use ndarray::{stack, Array, Array1, Array2, Axis, Zip};
 
     #[derive(Clone, Debug)]
     struct Sigmoid2DTestConfig<F: FieldExt> {
@@ -547,7 +545,7 @@ mod tests {
                                 Zip::from(slice.view())
                                     .and(input)
                                     .and(input_advice)
-                                    .map_collect(|input, instance, column| {
+                                    .map_collect(|_input, instance, column| {
                                         region
                                             .assign_advice_from_instance(
                                                 || "assign input",

@@ -1,4 +1,4 @@
-use std::{fmt::Debug, hash::Hash, marker::PhantomData};
+use std::{fmt::Debug, marker::PhantomData};
 
 use halo2_proofs::{
     arithmetic::FieldExt,

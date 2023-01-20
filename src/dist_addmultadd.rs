@@ -4,13 +4,13 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
-        Advice, Assigned, Column, ConstraintSystem, Error as PlonkError, Expression, Instance,
+        Advice, Column, ConstraintSystem, Error as PlonkError,
         Selector,
     },
     poly::Rotation,
 };
 use ndarray::{
-    concatenate, stack, Array, Array1, Array2, Array3, Array4, ArrayBase, Axis, Dim, Zip,
+    Array1, Array2, Array3, Axis, Zip,
 };
 
 #[derive(Clone, Debug)]
@@ -26,7 +26,7 @@ pub struct DistrubutedAddMulAddConfig<F: FieldExt> {
     _marker: PhantomData<F>,
 }
 
-/// Chip for Distrubted Multiplication by a constant
+/// Chip for Distrubted Addition, then Multiplication, then Addition by constants
 ///
 /// Order for ndarrays is Channel-in, Width, Height
 pub struct DistrubutedAddMulAddChip<F: FieldExt> {
@@ -174,16 +174,14 @@ mod tests {
     use super::{DistrubutedAddMulAddChip, DistrubutedAddMulAddConfig};
     use halo2_proofs::{
         arithmetic::FieldExt,
-        circuit::{AssignedCell, Chip, Layouter, SimpleFloorPlanner, Value},
+        circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
         plonk::{
-            Advice, Assigned, Assignment, Circuit, Column, ConstraintSystem, Error as PlonkError,
-            Expression, Instance, Selector,
+            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
         },
-        poly::Rotation,
     };
-    use ndarray::{array, stack, Array, Array1, Array2, Array3, Array4, ArrayBase, Axis, Zip};
+    use ndarray::{stack, Array, Array1, Array2, Array3, Axis, Zip};
 
     #[derive(Clone, Debug)]
     struct DistributedAddMulAddTestConfig<F: FieldExt> {
@@ -289,7 +287,7 @@ mod tests {
                                 Zip::from(slice.view())
                                     .and(input)
                                     .and(input_advice)
-                                    .map_collect(|input, instance, column| {
+                                    .map_collect(|_input, instance, column| {
                                         region
                                             .assign_advice_from_instance(
                                                 || "assign input",
@@ -327,8 +325,8 @@ mod tests {
     }
 
     #[test]
-    ///test that a simple 16x16x4 dist mult works
-    fn test_simple_conv() -> Result<(), PlonkError> {
+    ///test that a simple 16x16x4 dist add_mult_add works
+    fn test_simple_add_mult_add() -> Result<(), PlonkError> {
         let circuit = DistributedAddMulAddTestCircuit {
             scalars: Array::from_shape_simple_fn(DEPTH, || {
                 (

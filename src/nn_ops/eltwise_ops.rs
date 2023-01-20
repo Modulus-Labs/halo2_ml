@@ -1,4 +1,4 @@
-use std::{fmt::Debug, hash::Hash, marker::PhantomData};
+use std::{fmt::Debug, marker::PhantomData};
 
 use halo2_proofs::{
     arithmetic::FieldExt,
@@ -326,7 +326,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeChip<F, BASE, K> {
             expr.push(
                 s_elt.clone()
                     * (bit_sign.clone() * (input.clone() - word_sum.clone())
-                        + (constant_1.clone() - bit_sign.clone()) * (input + word_sum.clone())),
+                        + (constant_1.clone() - bit_sign.clone()) * (input + word_sum)),
             );
             expr.push(s_elt * ((bit_sign.clone()*(output.clone() - trunc_sum.clone()))+((constant_1 - bit_sign)*(output + trunc_sum))));
             expr
@@ -554,7 +554,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeReluChip<F, BASE, 
             expr.push(
                 s_elt.clone()
                     * (bit_sign.clone() * (input.clone() - word_sum.clone())
-                        + (constant_1.clone() - bit_sign.clone()) * (input + word_sum.clone())),
+                        + (constant_1.clone() - bit_sign.clone()) * (input + word_sum)),
             );
             expr.push(s_elt * ((bit_sign.clone()*(output.clone() - trunc_sum))+((constant_1 - bit_sign)*output)));
             expr

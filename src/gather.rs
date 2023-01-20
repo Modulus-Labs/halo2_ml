@@ -1,5 +1,5 @@
 use halo2_curves::FieldExt;
-use halo2_proofs::circuit::{AssignedCell, Value};
+use halo2_proofs::circuit::{AssignedCell};
 use ndarray::Array1;
 
 pub fn gather<F: FieldExt>(inputs: Array1<AssignedCell<F, F>>, index_map: Array1<usize>) -> Array1<AssignedCell<F, F>> {
@@ -10,23 +10,18 @@ pub fn gather<F: FieldExt>(inputs: Array1<AssignedCell<F, F>>, index_map: Array1
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        felt_from_i64,
-        nn_ops::{eltwise_ops::NormalizeChip, lookup_ops::DecompTable},
-    };
+    
 
     use halo2_proofs::{
         arithmetic::FieldExt,
-        circuit::{AssignedCell, Chip, Layouter, SimpleFloorPlanner, Value},
+        circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
         plonk::{
-            Advice, Assigned, Assignment, Circuit, Column, ConstraintSystem, Error as PlonkError,
-            Expression, Instance, Selector,
+            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
         },
-        poly::Rotation,
     };
-    use ndarray::{array, stack, Array, Array1, Array2, Array3, Array4, ArrayBase, Axis, Zip};
+    use ndarray::{Array, Array1, Zip};
     use std::marker::PhantomData;
 
     use super::gather;
@@ -93,7 +88,7 @@ mod tests {
                     self.input
                         .iter()
                         .enumerate()
-                        .map(|(row, input)| {
+                        .map(|(row, _input)| {
                             region.assign_advice_from_instance(
                                 || "assign input",
                                 input_col,
