@@ -93,7 +93,7 @@ impl<F: FieldExt> DistrubutedMulChip<F> {
         }
     }
 
-    fn add_layer(
+    pub fn add_layer(
         &self,
         layouter: &mut impl Layouter<F>,
         inputs: &Array3<AssignedCell<F, F>>,
