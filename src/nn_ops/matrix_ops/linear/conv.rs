@@ -1,17 +1,19 @@
-use std::marker::PhantomData;
+use std::marker::{PhantomData};
 
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
         Advice, Column, ConstraintSystem, Error as PlonkError, Expression,
-        Selector,
+        Selector, Fixed,
     },
     poly::Rotation,
 };
 use ndarray::{
-    concatenate, stack, Array, Array1, Array2, Array3, Array4, Axis, Zip,
+    concatenate, stack, Array, Array1, Array2, Array3, Array4, Axis, Zip, ArrayView3, ArrayView4,
 };
+
+use crate::nn_ops::{DecompConfig, NNLayer, ColumnAllocator};
 
 #[derive(Clone, Debug)]
 pub struct Conv3DLayerConfig<F: FieldExt> {
@@ -24,19 +26,19 @@ pub struct Conv3DLayerConfig<F: FieldExt> {
     pub padding_height: usize,
     pub inputs: Array2<Column<Advice>>,
     pub outputs: Array1<Column<Advice>>,
-    pub kernals: Array2<Column<Advice>>,
+    pub kernals: Array2<Column<Fixed>>,
     pub conv_selectors: Vec<Selector>,
     _marker: PhantomData<F>,
 }
 
-///Chip for 2-D Convolution (width, height, channel-in, channel-out)
+///Chip for 2-D Convolution
 ///
 /// Order for ndarrays is Channel-in, Width, Height, Channel-out
 pub struct Conv3DLayerChip<F: FieldExt> {
     config: Conv3DLayerConfig<F>,
 }
 
-impl<F: FieldExt> Chip<F> for Conv3DLayerChip<F> {
+impl<'a, F: FieldExt> Chip<F> for Conv3DLayerChip<F> {
     type Config = Conv3DLayerConfig<F>;
     type Loaded = ();
 
@@ -64,26 +66,57 @@ impl<F: FieldExt> InputOrPadding<F> {
     }
 }
 
-impl<F: FieldExt> Conv3DLayerChip<F> {
-    const DEPTH_AXIS: Axis = Axis(0);
-    const COLUMN_AXIS: Axis = Axis(1);
-    const ROW_AXIS: Axis = Axis(2);
+pub struct Conv3DLayerConfigParams {
+    input_height: usize,
+    input_width: usize,
+    input_depth: usize,
+    ker_height: usize,
+    ker_width: usize,
+    c_out_size: usize,
+    padding_width: usize,
+    padding_height: usize,
+}
+
+pub struct Conv3DLayerParams<F: FieldExt> {
+    kernals: Array4<Value<F>>,
+}
+
+impl<'a, F: FieldExt> NNLayer<F> for Conv3DLayerChip<F> {
     const C_OUT_AXIS: Axis = Axis(3);
 
-    pub fn construct(config: <Self as Chip<F>>::Config) -> Self {
+    type LayerInput = Array3<AssignedCell<F, F>>;
+
+    type ConfigParams = Conv3DLayerConfigParams;
+    type LayerParams = Conv3DLayerParams<F>;
+
+    type LayerOutput = Array3<AssignedCell<F, F>>;
+
+    fn construct(config: <Self as Chip<F>>::Config) -> Self {
         Self { config }
     }
 
-    pub fn configure(
+    fn configure(
         meta: &mut ConstraintSystem<F>,
-        inputs: Array2<Column<Advice>>,
-        kernals: Array2<Column<Advice>>,
-        outputs: Array1<Column<Advice>>,
-        ker_height: usize,
-        ker_width: usize,
-        padding_width: usize,
-        padding_height: usize,
+        config_params: Conv3DLayerConfigParams,
+        advice_allocator: &mut ColumnAllocator<Advice>,
+        fixed_allocator: &mut ColumnAllocator<Fixed>,
     ) -> <Self as Chip<F>>::Config {
+        let Conv3DLayerConfigParams{
+            input_height: _, input_width, input_depth, ker_height, ker_width, padding_width, padding_height, c_out_size
+        } = config_params;
+        let output_width = input_width + padding_width * 2 - ker_width + 1;
+        let input_column_count = (input_width + padding_width*2)*input_depth;
+        let output_column_count = output_width;
+        let advice_count = input_column_count + output_column_count;
+        let fixed_count = ker_width * input_depth;
+
+        let advice = advice_allocator.take(meta, advice_count);
+        let fixed = fixed_allocator.take(meta, fixed_count);
+
+        let inputs = Array::from_shape_vec((input_depth, (input_width + padding_width*2)), advice[0..input_column_count].to_vec()).unwrap();
+        let outputs = Array::from_shape_vec(output_width, advice[input_column_count..input_column_count + output_column_count].to_vec()).unwrap();
+
+        let kernals = Array::from_shape_vec((input_depth, ker_width), fixed.to_vec()).unwrap();
         let ker_height_i32: i32 = ker_height.try_into().unwrap();
         let selectors: Vec<Selector> = (0..ker_height_i32)
             .into_iter()
@@ -113,7 +146,7 @@ impl<F: FieldExt> Conv3DLayerChip<F> {
                             .into_iter()
                             .map(|index| {
                                 kernals.map(|column| {
-                                    meta.query_advice(*column, Rotation(index - offset))
+                                    meta.query_fixed(*column, Rotation(index - offset))
                                 })
                             })
                             .collect::<Vec<_>>()
@@ -163,12 +196,14 @@ impl<F: FieldExt> Conv3DLayerChip<F> {
         }
     }
 
-    pub fn add_layer(
+    fn add_layer(
         &self,
         layouter: &mut impl Layouter<F>,
-        inputs: &Array3<AssignedCell<F, F>>,
-        kernals: &Array4<Value<F>>,
+        inputs: Array3<AssignedCell<F, F>>,
+        layer_params: Conv3DLayerParams<F>
     ) -> Result<Array3<AssignedCell<F, F>>, PlonkError> {
+        let Conv3DLayerParams { kernals } = layer_params;
+
         let config = &self.config;
 
         //add padding
@@ -253,7 +288,7 @@ impl<F: FieldExt> Conv3DLayerChip<F> {
                                     Zip::from(kernal).and(config.kernals.view()).for_each(
                                         |kernal, column| {
                                             region
-                                                .assign_advice(
+                                                .assign_fixed(
                                                     || "place kernal",
                                                     *column,
                                                     row + offset,
@@ -327,18 +362,21 @@ impl<F: FieldExt> Conv3DLayerChip<F> {
         )
         .unwrap())
     }
+
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Conv3DLayerChip, Conv3DLayerConfig};
+    use crate::nn_ops::{DefaultDecomp, NNLayer, ColumnAllocator};
+
+    use super::{Conv3DLayerChip, Conv3DLayerConfig, Conv3DLayerConfigParams, Conv3DLayerParams};
     use halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
         plonk::{
-            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
+            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance, Fixed,
         },
     };
     use ndarray::{stack, Array, Array2, Array3, Array4, Axis, Zip};
@@ -385,36 +423,47 @@ mod tests {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            let inputs =
-                Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH + PADDING_WIDTH * 2), || {
-                    let col = meta.advice_column();
-                    meta.enable_equality(col);
-                    col
-                });
+            // let inputs =
+            //     Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH + PADDING_WIDTH * 2), || {
+            //         let col = meta.advice_column();
+            //         meta.enable_equality(col);
+            //         col
+            //     });
 
-            let kernals = Array::from_shape_simple_fn((DEPTH, KERNAL_WIDTH), || {
-                let col = meta.advice_column();
-                meta.enable_equality(col);
-                col
-            });
+            // let kernals = Array::from_shape_simple_fn((DEPTH, KERNAL_WIDTH), || {
+            //     let col = meta.advice_column();
+            //     meta.enable_equality(col);
+            //     col
+            // });
 
             let output_width = INPUT_WIDTH + PADDING_WIDTH * 2 - KERNAL_WIDTH + 1;
 
-            let outputs = Array::from_shape_simple_fn(output_width, || {
-                let col = meta.advice_column();
-                meta.enable_equality(col);
-                col
-            });
+            // let outputs = Array::from_shape_simple_fn(output_width, || {
+            //     let col = meta.advice_column();
+            //     meta.enable_equality(col);
+            //     col
+            // });
+
+            let mut advice_allocator = ColumnAllocator::<Advice>::new(meta, 2);
+
+            let mut fixed_allocator = ColumnAllocator::<Fixed>::new(meta, 2);
+
+            let config_params = Conv3DLayerConfigParams {
+                input_height: INPUT_HEIGHT,
+                input_width: INPUT_WIDTH,
+                input_depth: DEPTH,
+                ker_height: KERNAL_HEIGHT,
+                ker_width: KERNAL_WIDTH,
+                c_out_size: DEPTH,
+                padding_width: PADDING_WIDTH,
+                padding_height: PADDING_HEIGHT,
+            };
 
             let conv_chip = Conv3DLayerChip::configure(
                 meta,
-                inputs,
-                kernals,
-                outputs,
-                KERNAL_HEIGHT,
-                KERNAL_WIDTH,
-                PADDING_WIDTH,
-                PADDING_HEIGHT,
+                config_params,
+                &mut advice_allocator,
+                &mut fixed_allocator,
             );
 
             ConvTestConfig {
@@ -481,7 +530,11 @@ mod tests {
                 },
             )?;
 
-            let output = conv_chip.add_layer(&mut layouter, &inputs, &self.kernal)?;
+            let layer_params = Conv3DLayerParams {
+                kernals: self.kernal.clone(),
+            };
+
+            let output = conv_chip.add_layer(&mut layouter, inputs, layer_params)?;
             let input = config.output.view();
             for (row, slice) in output.axis_iter(Axis(2)).enumerate() {
                 Zip::from(slice.view())

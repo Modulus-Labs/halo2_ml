@@ -2,8 +2,8 @@
 use std::{collections::HashMap, time::Instant};
 
 use halo2_machinelearning::{
-    nn_chip::{ForwardLayerChip, ForwardLayerConfig, LayerParams, NNLayerInstructions},
-    nn_ops::{self, eltwise_ops::NormalizeChip},
+    nn_ops::vector_ops::linear::fc::{FcChip, FcConfig, FcParams, NNLayerInstructions},
+    nn_ops::{self, vector_ops::non_linear::eltwise_ops::NormalizeChip},
 };
 use halo2_proofs::{
     arithmetic::FieldExt,
@@ -19,7 +19,7 @@ use halo2_proofs::{
     },
     transcript::{Blake2bRead, TranscriptReadBuffer, TranscriptWriterBuffer},
 };
-use nn_ops::eltwise_ops::NormalizeReluChip;
+use nn_ops::vector_ops::non_linear::eltwise_ops::NormalizeReluChip;
 
 use halo2_machinelearning::nn_ops::lookup_ops::DecompTable;
 
@@ -39,14 +39,14 @@ pub struct LenetConfig<F: FieldExt> {
     output: Column<Instance>,
     range_table: DecompTable<F, BASE>,
     //layers: Vec<ForwardLayerConfig<F, NormalizeReluChip<F, 1024, 2>, 16, 16>>,
-    layers: HashMap<(usize, usize, bool), ForwardLayerConfig<F>>,
+    layers: HashMap<(usize, usize, bool), FcConfig<F>>,
 }
 
 type NetworkArch = &'static [(usize, usize, bool)];
 
 #[derive(Default)]
 pub struct LenetCircuit<F: FieldExt, const STRUCT: NetworkArch, const MAX_MAT_WIDTH: usize> {
-    pub layers: Vec<LayerParams<F>>,
+    pub layers: Vec<FcParams<F>>,
     pub input: Vec<Value<F>>,
     //_marker: PhantomData<&'a PhantomData<F>>,
 }
@@ -61,7 +61,7 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
     fn without_witnesses(&self) -> Self {
         let layers = NETWORK
             .iter()
-            .map(|(width, height, _relu)| LayerParams {
+            .map(|(width, height, _relu)| FcParams {
                 weights: vec![Value::unknown(); width * height],
                 biases: vec![Value::unknown(); *height],
             })
@@ -122,7 +122,7 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
                 if relu {
                     layers.insert(
                         *key,
-                        ForwardLayerChip::<F, NormalizeReluChip<F, BASE, 2>>::configure(
+                        FcChip::<F, NormalizeReluChip<F, BASE, 2>>::configure(
                             meta,
                             width,
                             height,
@@ -136,7 +136,7 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
                 } else {
                     layers.insert(
                         *key,
-                        ForwardLayerChip::<_, NormalizeChip<F, BASE, 2>>::configure(
+                        FcChip::<_, NormalizeChip<F, BASE, 2>>::configure(
                             meta,
                             width,
                             height,
@@ -175,7 +175,7 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
         for (index, (key, layer)) in NETWORK.iter().zip(self.layers.iter()).enumerate() {
             let (_, _, relu) = key;
             input = if *relu {
-                let chip = ForwardLayerChip::<_, NormalizeReluChip<F, BASE, 2>>::construct(
+                let chip = FcChip::<_, NormalizeReluChip<F, BASE, 2>>::construct(
                     config.layers.get(key).unwrap().clone(),
                 );
                 let inter = input.unwrap_or_else(|| {
@@ -195,7 +195,7 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
                 )?;
                 Some(inter)
             } else {
-                let chip = ForwardLayerChip::<_, NormalizeChip<F, BASE, 2>>::construct(
+                let chip = FcChip::<_, NormalizeChip<F, BASE, 2>>::construct(
                     config.layers.get(key).unwrap().clone(),
                 );
                 let inter = input.unwrap_or_else(|| {
@@ -323,6 +323,7 @@ fn bench_layer<const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize>(
 }
 
 fn main() {
+    let thing = vec![Fr::zero()].iter().cycle();
     //num_params benches
     println!("num_params_benches");
     println!("---------------------------");
@@ -1796,7 +1797,7 @@ fn main() {
     }
 }
 
-fn get_inputs(file_path: &str) -> (Vec<Fr>, Vec<LayerParams<Fr>>, Vec<Fr>) {
+fn get_inputs(file_path: &str) -> (Vec<Fr>, Vec<FcParams<Fr>>, Vec<Fr>) {
     // const PREFIX: &str = "/home/aweso/halo2_machinelearning/bench_objects/";
     const PREFIX: &str = "/home/ubuntu/halo2_benches_new/bench_objects/";
     let inputs_raw = std::fs::read_to_string(PREFIX.to_owned() + file_path).unwrap();
@@ -1805,9 +1806,9 @@ fn get_inputs(file_path: &str) -> (Vec<Fr>, Vec<LayerParams<Fr>>, Vec<Fr>) {
         .members()
         .map(|x| felt_from_i64(x.as_i64().unwrap()))
         .collect();
-    let layers: Vec<LayerParams<Fr>> = inputs["layers"]
+    let layers: Vec<FcParams<Fr>> = inputs["layers"]
         .members()
-        .map(|layer| LayerParams {
+        .map(|layer| FcParams {
             weights: layer["weight"]
                 .members()
                 .map(|x| Value::known(felt_from_i64(x.as_i64().unwrap())))

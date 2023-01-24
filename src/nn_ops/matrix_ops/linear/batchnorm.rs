@@ -4,7 +4,7 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
-        Advice, Column, ConstraintSystem, Error as PlonkError,
+        Advice, Column, ConstraintSystem, Error as PlonkError, Fixed,
     },
 };
 use ndarray::{
@@ -12,13 +12,14 @@ use ndarray::{
 };
 
 use crate::{
-    dist_addmultadd::{DistrubutedAddMulAddChip, DistrubutedAddMulAddConfig},
-    norm_2d::{Normalize2dChip, Normalize2dConfig},
+    nn_ops::matrix_ops::linear::dist_addmultadd::{DistributedAddMulAddChip, DistributedAddMulAddConfig},
+    nn_ops::{matrix_ops::non_linear::norm_2d::{Normalize2dChip, Normalize2dConfig}, NNLayer, DecompConfig, ColumnAllocator, InputSizeConfig},
+    nn_ops::matrix_ops::linear::dist_addmultadd::DistributedAddMulAddChipParams
 };
 
 #[derive(Clone, Debug)]
 pub struct BatchnormConfig<F: FieldExt> {
-    add_mult_add_chip: DistrubutedAddMulAddConfig<F>,
+    add_mult_add_chip: DistributedAddMulAddConfig<F>,
     norm_2d_chip: Normalize2dConfig<F>,
     _marker: PhantomData<F>,
 }
@@ -43,58 +44,90 @@ impl<F: FieldExt> Chip<F> for BatchnormChip<F> {
     }
 }
 
-impl<F: FieldExt> BatchnormChip<F> {
-    const DEPTH_AXIS: Axis = Axis(0);
-    const COLUMN_AXIS: Axis = Axis(1);
-    const ROW_AXIS: Axis = Axis(2);
+pub struct BatchnormChipConfig<F: FieldExt> {
+    input_height: usize,
+    input_width: usize,
+    input_depth: usize,
+    norm_2d_chip: Normalize2dConfig<F>
+}
 
-    pub fn construct(config: <Self as Chip<F>>::Config) -> Self {
+pub struct BatchnormChipParams<F: FieldExt> {
+    scalars: Array1<(Value<F>, Value<F>, Value<F>)>,
+}
+
+impl<F: FieldExt> NNLayer<F> for BatchnormChip<F> {
+    type ConfigParams = BatchnormChipConfig<F>;
+
+    type LayerInput = Array3<AssignedCell<F, F>>;
+
+    type LayerParams = BatchnormChipParams<F>;
+
+    type LayerOutput = Array3<AssignedCell<F, F>>;
+
+
+    fn construct(config: <Self as Chip<F>>::Config) -> Self {
         Self { config }
     }
 
-    pub fn configure(
+    fn configure(
         meta: &mut ConstraintSystem<F>,
-        inputs: Array2<Column<Advice>>,
-        outputs: Array2<Column<Advice>>,
-        scalars: Array1<(Column<Advice>, Column<Advice>, Column<Advice>)>,
-        norm_2d_chip: Normalize2dConfig<F>,
+        config: BatchnormChipConfig<F>,
+        advice_allocator: &mut ColumnAllocator<Advice>,
+        fixed_allocator: &mut ColumnAllocator<Fixed>,
     ) -> <Self as Chip<F>>::Config {
-        let add_mult_add_chip = DistrubutedAddMulAddChip::configure(meta, inputs, outputs, scalars);
+        let dist_config = InputSizeConfig {
+            input_height: config.input_height,
+            input_width: config.input_width,
+            input_depth: config.input_depth,
+        };
+
+        let add_mult_add_chip = DistributedAddMulAddChip::configure(meta, dist_config, advice_allocator, fixed_allocator);
 
         BatchnormConfig {
             add_mult_add_chip,
-            norm_2d_chip,
+            norm_2d_chip: config.norm_2d_chip,
             _marker: PhantomData,
         }
     }
 
-    pub fn add_layer(
+    fn add_layer(
         &self,
         layouter: &mut impl Layouter<F>,
-        inputs: &Array3<AssignedCell<F, F>>,
-        scalars: &Array1<(Value<F>, Value<F>, Value<F>)>,
+        inputs: Array3<AssignedCell<F, F>>,
+        params: BatchnormChipParams<F>,
     ) -> Result<Array3<AssignedCell<F, F>>, PlonkError> {
+        let BatchnormChipParams {
+            scalars
+        } = params;
         let layouter = &mut layouter.namespace(|| "Batchnorm");
         let config = &self.config;
+
+        let params = DistributedAddMulAddChipParams {
+            scalars,
+        };
+
         let un_normed_output =
-            DistrubutedAddMulAddChip::construct(config.add_mult_add_chip.clone())
-                .add_layer(layouter, inputs, scalars)?;
-        Ok(stack(
-            Self::DEPTH_AXIS,
-            un_normed_output
-                .axis_iter(Self::DEPTH_AXIS)
-                .map(|input_mat| {
-                    Normalize2dChip::<F, 1024, 2>::construct(config.norm_2d_chip.clone())
-                        .add_layer(layouter, &input_mat.to_owned())
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
-                .map(|x| x.view())
-                .collect::<Vec<_>>()
-                .as_slice(),
-        )
-        .unwrap())
+            DistributedAddMulAddChip::construct(config.add_mult_add_chip.clone())
+                .add_layer(layouter, inputs, params)?;
+        // Ok(stack(
+        //     Self::DEPTH_AXIS,
+        //     un_normed_output
+        //         .axis_iter(Self::DEPTH_AXIS)
+        //         .map(|input_mat| {
+        //             Normalize2dChip::construct(config.norm_2d_chip.clone())
+        //                 .add_layer(layouter, input_mat.to_owned())
+        //         })
+        //         .collect::<Result<Vec<_>, _>>()?
+        //         .iter()
+        //         .map(|x| x.view())
+        //         .collect::<Vec<_>>()
+        //         .as_slice(),
+        // )
+        // .unwrap())
+
+        Normalize2dChip::construct(config.norm_2d_chip.clone()).add_layer(layouter, un_normed_output, ())
     }
+
 }
 
 // #[cfg(test)]

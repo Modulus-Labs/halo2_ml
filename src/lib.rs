@@ -1,26 +1,14 @@
-pub mod batchnorm;
-pub mod conv;
-pub mod dist_add;
-pub mod dist_addmultadd;
-pub mod dist_mul;
-pub mod norm_2d;
-pub mod nn_chip;
+#![feature(associated_type_defaults)]
 pub mod nn_ops;
-pub mod sigmoid;
-pub mod sigmoid_2d;
-pub mod relu_2d;
-pub mod gather;
-pub mod avg_pool;
 
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{Layouter, SimpleFloorPlanner},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance, Fixed},
 };
-use nn_chip::{ForwardLayerChip, ForwardLayerConfig, LayerParams, NNLayerInstructions};
-use nn_ops::eltwise_ops::{NormalizeChip, NormalizeReluChip};
+use nn_ops::{vector_ops::{linear::fc::{FcConfig, FcParams}, non_linear::eltwise_ops::NormalizeReluChip}, DefaultDecomp};
 
-use crate::nn_ops::lookup_ops::DecompTable;
+use crate::nn_ops::{lookup_ops::DecompTable, vector_ops::{non_linear::eltwise_ops::NormalizeChip, linear::fc::{FcChip, FcChipConfig}}, NNLayer, ColumnAllocator};
 
 pub fn felt_from_i64<F: FieldExt>(x: i64) -> F {
     if x.is_positive() {
@@ -35,13 +23,14 @@ pub fn felt_from_i64<F: FieldExt>(x: i64) -> F {
 pub struct NeuralNetConfig<F: FieldExt> {
     input: Column<Instance>,
     output: Column<Instance>,
-    range_table: DecompTable<F, 1024>,
-    layers: Vec<ForwardLayerConfig<F>>,
+    input_advice: Column<Advice>,
+    range_table: DecompTable<F, DefaultDecomp>,
+    layers: Vec<FcConfig<F>>,
 }
 
 #[derive(Default, Clone)]
 pub struct NNCircuit<F: FieldExt> {
-    pub layers: Vec<LayerParams<F>>,
+    pub layers: Vec<FcParams<F>>,
     pub input: Vec<F>,
     pub output: Vec<F>,
     //_marker: PhantomData<&'a PhantomData<F>>,
@@ -64,15 +53,7 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
         let output = meta.instance_column();
         meta.enable_equality(output);
 
-        let mat_advices: Vec<Column<Advice>> = (0..MAX_MAT_WIDTH + INPUT_WIDTH + 2)
-            .map(|_| {
-                let col = meta.advice_column();
-                meta.enable_equality(col);
-                col
-            })
-            .collect();
-
-        const DECOMP_COMPONENTS: usize = 15;
+        const DECOMP_COMPONENTS: usize = 10;
         let elt_advices: Vec<Column<Advice>> = (0..=DECOMP_COMPONENTS + 2)
             .map(|_| {
                 let col = meta.advice_column();
@@ -91,36 +72,38 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
             range_table.clone(),
         );
 
+        let config = FcChipConfig {
+            weights_height: INPUT_WIDTH,
+            weights_width: 4,
+            elt_config: relu_chip.clone(),
+        };
+
+        let mut advice_allocator = ColumnAllocator::<Advice>::new(meta, 1);
+        let mut fixed_allocator = ColumnAllocator::<Fixed>::new(meta, 0);
+
         let layers = vec![
-            ForwardLayerChip::<_, NormalizeChip<F, 1024, 2>>::configure(
+            FcChip::<_, NormalizeChip<F, 1024, 2>>::configure(
                 meta,
-                INPUT_WIDTH,
-                4,
-                mat_advices[0..INPUT_WIDTH].try_into().unwrap(),
-                mat_advices[INPUT_WIDTH..INPUT_WIDTH + 4]
-                    .try_into()
-                    .unwrap(),
-                mat_advices[mat_advices.len() - 2],
-                mat_advices[mat_advices.len() - 1],
-                relu_chip.clone(),
+                config.clone(),
+                &mut advice_allocator,
+                &mut fixed_allocator
             ),
-            ForwardLayerChip::<_, NormalizeChip<F, 1024, 2>>::configure(
+            FcChip::<_, NormalizeChip<F, 1024, 2>>::configure(
                 meta,
-                INPUT_WIDTH,
-                4,
-                mat_advices[0..INPUT_WIDTH].try_into().unwrap(),
-                mat_advices[INPUT_WIDTH..INPUT_WIDTH + 4]
-                    .try_into()
-                    .unwrap(),
-                mat_advices[mat_advices.len() - 2],
-                mat_advices[mat_advices.len() - 1],
-                relu_chip,
+                config,
+                &mut advice_allocator,
+                &mut fixed_allocator
             ),
         ];
 
         NeuralNetConfig {
             input,
             output,
+            input_advice: {
+                let col = meta.advice_column();
+                meta.enable_equality(col);
+                col
+            },
             range_table,
             layers,
         }
@@ -138,21 +121,27 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
         let layers: Vec<_> = config
             .layers
             .into_iter()
-            .map(|config| ForwardLayerChip::<_, NormalizeReluChip<F, 1024, 2>>::construct(config))
+            .map(|config| FcChip::<_, NormalizeReluChip<F, 1024, 2>>::construct(config))
             .collect();
-        let input = layers[0].load_input_instance(
-            layouter.namespace(|| "Load input from constant"),
-            config.input,
-            0,
-            self.input.len(),
-        )?;
+        // let input = layers[0].load_input_instance(
+        //     layouter.namespace(|| "Load input from constant"),
+        //     config.input,
+        //     0,
+        //     self.input.len(),
+        // )?;
+
+        let input = layouter.assign_region(|| "load input", |mut region| {
+            self.input.iter().enumerate().map(|(row, _)| {
+                region.assign_advice_from_instance(|| "Load Input", config.input, row, config.input_advice, row)
+            }).collect()
+        })?;
         let output = self.layers.iter().zip(layers.iter()).enumerate().fold(
             Ok(input),
             |input, (index, (layer, chip))| {
-                chip.add_layers(
-                    layouter.namespace(|| format!("NN Layer {index}")),
-                    input?,
-                    layer,
+                chip.add_layer(
+                    &mut layouter,
+                    input?, 
+                    layer.clone(),
                 )
             },
         )?;

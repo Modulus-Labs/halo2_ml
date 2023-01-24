@@ -15,9 +15,9 @@ use ndarray::{
 };
 
 use crate::{
-    norm_2d::{Normalize2dChip, Normalize2dConfig},
+    nn_ops::{matrix_ops::non_linear::norm_2d::{Normalize2dChip, Normalize2dConfig}, NNLayer},
     felt_from_i64,
-    nn_ops::lookup_ops::DecompTable,
+    nn_ops::{lookup_ops::DecompTable, DefaultDecomp},
 };
 
 #[derive(Clone, Debug)]
@@ -77,7 +77,7 @@ impl<F: FieldExt, const BASE: usize> Sigmoid2dChip<F, BASE> {
         ranges: Column<Advice>,
         outputs: Array1<Column<Advice>>,
         eltwise_inter: Array2<Column<Advice>>,
-        range_table: DecompTable<F, BASE>,
+        range_table: DecompTable<F, DefaultDecomp>,
         norm_chip: Normalize2dConfig<F>,
     ) -> <Self as Chip<F>>::Config {
         let comp_selector = meta.complex_selector();
@@ -399,14 +399,15 @@ impl<F: FieldExt, const BASE: usize> Sigmoid2dChip<F, BASE> {
             },
         )?;
 
-        let norm_chip = Normalize2dChip::<F, BASE, 2>::construct(config.norm_chip.clone());
-        norm_chip.add_layer(layouter, &sigmoid_output)
+        let norm_chip = Normalize2dChip::construct(config.norm_chip.clone());
+        norm_chip.add_layer(layouter, todo!(), ());
+        todo!()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{norm_2d::Normalize2dChip, felt_from_i64, nn_ops::lookup_ops::DecompTable};
+    use crate::{nn_ops::{matrix_ops::non_linear::norm_2d::Normalize2dChip, NNLayer}, felt_from_i64, nn_ops::{lookup_ops::DecompTable, DefaultDecomp}};
 
     use super::{Sigmoid2dChip, Sigmoid2dConfig};
     use halo2_proofs::{
@@ -426,7 +427,7 @@ mod tests {
         input_advice: Array1<Column<Advice>>,
         output: Array1<Column<Instance>>,
         sigmoid_chip: Sigmoid2dConfig<F>,
-        range_table: DecompTable<F, 1024>,
+        range_table: DecompTable<F, DefaultDecomp>,
     }
 
     struct Sigmoid2DTestCircuit<F: FieldExt> {
@@ -478,14 +479,13 @@ mod tests {
                 col
             };
 
-            let range_table: DecompTable<F, 1024> = DecompTable::configure(meta);
+            let range_table: DecompTable<F, DefaultDecomp> = DecompTable::configure(meta);
 
-            let norm_chip = Normalize2dChip::<_, 1024, 2>::configure(
+            let norm_chip = Normalize2dChip::configure(
                 meta,
-                inputs.clone(),
-                outputs.clone(),
-                eltwise_inter.clone(),
-                range_table.clone(),
+                todo!(),
+                todo!(),
+                todo!(),
             );
 
             let sigmoid_chip = Sigmoid2dChip::<_, 1024>::configure(

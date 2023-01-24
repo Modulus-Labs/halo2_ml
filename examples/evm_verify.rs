@@ -1,4 +1,4 @@
-use halo2_machinelearning::{nn_chip::LayerParams, NNCircuit};
+use halo2_machinelearning::{nn_ops::vector_ops::linear::fc::FcParams, NNCircuit};
 use halo2_proofs::{circuit::Value, poly::commitment::CommitmentScheme};
 
 
@@ -516,7 +516,7 @@ fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>)
 
 fn main() {
     let layers = vec![
-        LayerParams {
+        FcParams {
             weights: vec![1048576; 16]
                 .into_iter()
                 .map(|x: i64| {
@@ -532,7 +532,7 @@ fn main() {
                 .map(|x| Value::known(Fr::from(x)))
                 .collect(),
         },
-        LayerParams {
+        FcParams {
             weights: vec![1048576; 16]
                 .into_iter()
                 .map(|x| Value::known(Fr::from(x)))

@@ -5,7 +5,7 @@ use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
         Advice, Column, ConstraintSystem, Error as PlonkError, Expression,
-        Selector,
+        Selector, Fixed,
     },
     poly::Rotation,
 };
@@ -13,21 +13,18 @@ use ndarray::{
     Array1, Array3, Axis,
 };
 
-use crate::nn_ops::eltwise_ops::{DecompConfig, NormalizeChip, EltwiseInstructions};
+use crate::nn_ops::{vector_ops::non_linear::eltwise_ops::{DecompConfig as EltwiseDecompConfig, NormalizeChip, EltwiseInstructions}, NNLayer, ColumnAllocator, DecompConfig};
 
 #[derive(Clone, Debug)]
 pub struct AvgPool2DConfig<F: FieldExt> {
-    //pub in_width: usize,
-    //pub in_height: usize,
-    //pub in_depth: usize,
     pub inputs: Array1<Column<Advice>>,
     pub output: Column<Advice>,
     pub selector: Selector,
-    pub norm_chip: DecompConfig<F>,
+    pub norm_chip: EltwiseDecompConfig<F>,
     _marker: PhantomData<F>,
 }
 
-///Chip for 2-D Convolution (width, height, channel-in, channel-out)
+///Chip for 2-D Avg Pool
 ///
 /// Order for ndarrays is Channel-in, Width, Height, Channel-out
 pub struct AvgPool2DChip<F: FieldExt> {
@@ -47,37 +44,53 @@ impl<F: FieldExt> Chip<F> for AvgPool2DChip<F> {
     }
 }
 
-impl<F: FieldExt> AvgPool2DChip<F> {
-    const DEPTH_AXIS: Axis = Axis(0);
-    const COLUMN_AXIS: Axis = Axis(1);
-    const ROW_AXIS: Axis = Axis(2);
+pub struct AvgPool2DChipConfig<F: FieldExt> {
+    pub input_height: usize,
+    pub input_width: usize,
+    pub input_depth: usize,
+    pub norm_chip: EltwiseDecompConfig<F>
+}
 
-    const SCALING_FACTOR: u64 = 1_048_576;
+impl<F: FieldExt> NNLayer<F> for AvgPool2DChip<F> {
+    type ConfigParams = AvgPool2DChipConfig<F>;
 
-    const ROW_COUNT: usize = 8;
+    type LayerInput = Array3<AssignedCell<F, F>>;
 
-    pub fn construct(config: <Self as Chip<F>>::Config) -> Self {
+    type LayerOutput = Array1<AssignedCell<F, F>>;
+
+
+    fn construct(config: <Self as Chip<F>>::Config) -> Self {
         Self { config }
     }
 
-    pub fn configure(
+    fn configure(
         meta: &mut ConstraintSystem<F>,
-        inputs: Array1<Column<Advice>>,
-        output: Column<Advice>,
-        norm_chip: DecompConfig<F>,
+        config: AvgPool2DChipConfig<F>,
+        advice_allocator: &mut ColumnAllocator<Advice>,
+        _: &mut ColumnAllocator<Fixed>
+        // inputs: Array1<Column<Advice>>,
+        // output: Column<Advice>,
+        // norm_chip: DecompConfig<F>,
     ) -> <Self as Chip<F>>::Config {
         let selector = meta.selector();
+
+        let AvgPool2DChipConfig { input_height, input_width, input_depth, norm_chip } = config;
+
+        let advice = advice_allocator.take(meta, input_width + 1);
+
+        let inputs = Array1::from_vec(advice[0..input_width].to_vec());
+        let output = advice[advice.len()-1];
 
         meta.create_gate("Avg Pool", |meta| -> Vec<Expression<F>> {
             let sel = meta.query_selector(selector);
 
             let sum = inputs.fold(Expression::Constant(F::zero()), |accum, &item| {
-                (0..Self::ROW_COUNT).fold(accum, |accum, row| {
+                (0..input_height).fold(accum, |accum, row| {
                     accum + meta.query_advice(item, Rotation(row as i32))
                 })
             });
 
-            let scalar = Expression::Constant(F::from(Self::SCALING_FACTOR / (inputs.dim() as u64 * Self::ROW_COUNT as u64)));
+            let scalar = Expression::Constant(F::from(Self::DecompConfig::SCALING_FACTOR / (input_width as u64 * input_height as u64)));
 
             let output = meta.query_advice(output, Rotation::cur());
 
@@ -93,10 +106,11 @@ impl<F: FieldExt> AvgPool2DChip<F> {
         }
     }
 
-    pub fn add_layer(
+    fn add_layer(
         &self,
         layouter: &mut impl Layouter<F>,
-        inputs: &Array3<AssignedCell<F, F>>,
+        inputs: Array3<AssignedCell<F, F>>,
+        params: (),
     ) -> Result<Array1<AssignedCell<F, F>>, PlonkError> {
         let config = &self.config;
 
@@ -115,7 +129,7 @@ impl<F: FieldExt> AvgPool2DChip<F> {
                     input.value().zip(accum).map(|(&input, accum)| input + accum)
                 });
 
-                let scalar = F::from(Self::SCALING_FACTOR / (inputs.dim().0 as u64 * inputs.dim().1 as u64));
+                let scalar = F::from(Self::DecompConfig::SCALING_FACTOR / (inputs.dim().0 as u64 * inputs.dim().1 as u64));
 
                 let output = sum.map(|sum| sum * scalar);
 
@@ -133,8 +147,9 @@ impl<F: FieldExt> AvgPool2DChip<F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{nn_ops::{lookup_ops::DecompTable, eltwise_ops::NormalizeChip}, felt_from_i64};
+    use crate::{nn_ops::{lookup_ops::DecompTable, vector_ops::non_linear::eltwise_ops::NormalizeChip, NNLayer, matrix_ops::non_linear::avg_pool::AvgPool2DChipConfig, ColumnAllocator}, felt_from_i64};
 
+    use crate::nn_ops::DefaultDecomp;
     use super::{AvgPool2DChip, AvgPool2DConfig};
     use halo2_proofs::{
         arithmetic::FieldExt,
@@ -142,7 +157,7 @@ mod tests {
         dev::MockProver,
         halo2curves::bn256::Fr,
         plonk::{
-            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
+            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance, Fixed,
         },
     };
     use ndarray::{stack, Array, Array2, Array3, Axis, Zip};
@@ -153,7 +168,7 @@ mod tests {
         input_advice: Array2<Column<Advice>>,
         output: Column<Instance>,
         avg_chip: AvgPool2DConfig<F>,
-        range_table: DecompTable<F, 1024>
+        range_table: DecompTable<F, DefaultDecomp>
     }
 
     struct AvgPool2DTestCircuit<F: FieldExt> {
@@ -179,13 +194,6 @@ mod tests {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            let inputs =
-                Array::from_shape_simple_fn(INPUT_WIDTH, || {
-                    let col = meta.advice_column();
-                    meta.enable_equality(col);
-                    col
-                });
-
             let output = {
                 let col = meta.advice_column();
                 meta.enable_equality(col);
@@ -200,7 +208,7 @@ mod tests {
                 col
             });
 
-            let range_table: DecompTable<F, 1024> = DecompTable::configure(meta);
+            let range_table: DecompTable<F, DefaultDecomp> = DecompTable::configure(meta);
 
             let norm_input = {
                 let col = meta.advice_column();
@@ -216,12 +224,21 @@ mod tests {
                 range_table.clone(),
             );
 
+            let config = AvgPool2DChipConfig {
+                input_height: INPUT_HEIGHT,
+                input_width: INPUT_WIDTH,
+                input_depth: DEPTH,
+                norm_chip,
+            };
+
+            let mut advice_allocator = ColumnAllocator::<Advice>::new(meta, 0);
+            let mut fixed_allocator = ColumnAllocator::<Fixed>::new(meta, 0);
 
             let avg_chip = AvgPool2DChip::configure(
                 meta,
-                inputs,
-                output,
-                norm_chip,
+                config,
+                &mut advice_allocator,
+                &mut fixed_allocator,
             );
 
             AvgPool2DTestConfig {
@@ -293,7 +310,7 @@ mod tests {
                 },
             )?;
 
-            let output = avg_chip.add_layer(&mut layouter, &inputs)?;
+            let output = avg_chip.add_layer(&mut layouter, inputs, ())?;
             for (row, output) in output.iter().enumerate() {
                 layouter
                     .constrain_instance(output.cell(), config.output, row)

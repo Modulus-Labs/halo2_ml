@@ -6,14 +6,16 @@ use halo2_proofs::{
     plonk::{ConstraintSystem, Error as PlonkError, TableColumn},
 };
 
+use super::DecompConfig;
+
 #[derive(Debug, Clone)]
-pub struct DecompTable<F: FieldExt, const SIZE: usize> {
+pub struct DecompTable<F: FieldExt, Decomp: DecompConfig> {
     pub range_check_table: TableColumn,
-    _marker: PhantomData<F>,
+    _marker: PhantomData<(F, Decomp)>,
 }
 
-impl<F: FieldExt, const SIZE: usize> DecompTable<F, SIZE> {
-    pub fn configure(meta: &mut ConstraintSystem<F>) -> DecompTable<F, SIZE> {
+impl<F: FieldExt, Decomp: DecompConfig> DecompTable<F, Decomp> {
+    pub fn configure(meta: &mut ConstraintSystem<F>) -> Self {
         DecompTable {
             range_check_table: meta.lookup_table_column(),
             _marker: PhantomData,
@@ -24,7 +26,7 @@ impl<F: FieldExt, const SIZE: usize> DecompTable<F, SIZE> {
         layouter.assign_table(
             || "eltwise decomp table",
             |mut table| {
-                for offset in 0..SIZE {
+                for offset in 0..Decomp::BASE {
                     let value: u64 = offset.try_into().unwrap();
                     table.assign_cell(
                         || format!("decomp_table row {offset}"),

@@ -4,20 +4,20 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
-        Advice, Column, ConstraintSystem, Error as PlonkError, Expression,
+        Advice, Fixed, Column, ConstraintSystem, Error as PlonkError, Expression,
         Selector,
     },
     poly::Rotation,
 };
 
 use ndarray::{
-    stack, Array1, Array2, Axis,
+    stack, Array1, Array2, Axis, Array, Array3,
 };
 
-use crate::nn_ops::lookup_ops::DecompTable;
+use crate::nn_ops::{lookup_ops::DecompTable, NNLayer, DecompConfig, ColumnAllocator};
 
 #[derive(Clone, Debug)]
-pub struct ReluNorm2dConfig<F: FieldExt> {
+pub struct ReluNorm2DConfig<F: FieldExt> {
     //pub in_width: usize,
     //pub in_height: usize,
     //pub in_depth: usize,
@@ -32,12 +32,12 @@ pub struct ReluNorm2dConfig<F: FieldExt> {
 /// Chip for 2d eltwise
 ///
 /// Order for ndarrays is Channel-in, Width, Height
-pub struct ReluNorm2dChip<F: FieldExt, const BASE: usize, const K: usize> {
-    config: ReluNorm2dConfig<F>,
+pub struct ReluNorm2DChip<F: FieldExt> {
+    config: ReluNorm2DConfig<F>,
 }
 
-impl<F: FieldExt, const BASE: usize, const K: usize> Chip<F> for ReluNorm2dChip<F, BASE, K> {
-    type Config = ReluNorm2dConfig<F>;
+impl<F: FieldExt> Chip<F> for ReluNorm2DChip<F> {
+    type Config = ReluNorm2DConfig<F>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -49,23 +49,47 @@ impl<F: FieldExt, const BASE: usize, const K: usize> Chip<F> for ReluNorm2dChip<
     }
 }
 
-impl<F: FieldExt, const BASE: usize, const K: usize> ReluNorm2dChip<F, BASE, K> {
-    const COLUMN_AXIS: Axis = Axis(0);
-    const ROW_AXIS: Axis = Axis(1);
-    const ADVICE_LEN: usize = 10;
+pub struct ReluNorm2DChipConfig<F: FieldExt, Decomp: DecompConfig> {
+    pub input_height: usize,
+    pub input_width: usize,
+    pub input_depth: usize,
+    pub range_table: DecompTable<F, Decomp>,
+}
 
-    pub fn construct(config: <Self as Chip<F>>::Config) -> Self {
+impl<F: FieldExt> NNLayer<F> for ReluNorm2DChip<F> {
+    type ConfigParams = ReluNorm2DChipConfig<F, Self::DecompConfig>;
+
+    type LayerInput = Array3<AssignedCell<F, F>>;
+
+    type LayerOutput = Array3<AssignedCell<F, F>>;
+
+    fn construct(config: <Self as Chip<F>>::Config) -> Self {
         Self { config }
     }
 
-    pub fn configure(
+    fn configure(
         meta: &mut ConstraintSystem<F>,
-        inputs: Array1<Column<Advice>>,
-        outputs: Array1<Column<Advice>>,
-        eltwise_inter: Array2<Column<Advice>>,
-        range_table: DecompTable<F, BASE>,
+        config: Self::ConfigParams,
+        advice_allocator: &mut ColumnAllocator<Advice>,
+        _: &mut ColumnAllocator<Fixed>
+        // inputs: Array1<Column<Advice>>,
+        // outputs: Array1<Column<Advice>>,
+        // eltwise_inter: Array2<Column<Advice>>,
+        // range_table: DecompTable<F, { Self::DecompConfig::BASE }>,
     ) -> <Self as Chip<F>>::Config {
         let selector = meta.complex_selector();
+        let input_width = config.input_width;
+        let range_table = config.range_table;
+
+        let advice = advice_allocator.take(meta, config.input_width * (2 + Self::DecompConfig::ADVICE_LEN + 1));
+        let inputs = Array1::from_vec(advice[0..input_width].to_vec());
+        let outputs = Array1::from_vec(advice[input_width..input_width*2].to_vec());
+
+        let bit_signs = Array1::from_vec(advice[input_width*2..input_width*3].to_vec());
+
+        let eltwise_inter = advice[input_width*3..advice.len()].to_vec();
+
+        let eltwise_inter = Array::from_shape_vec((input_width, Self::DecompConfig::ADVICE_LEN), eltwise_inter).unwrap();
 
         for &item in eltwise_inter.iter() {
             meta.lookup("lookup", |meta| {
@@ -75,24 +99,17 @@ impl<F: FieldExt, const BASE: usize, const K: usize> ReluNorm2dChip<F, BASE, K> 
             });
         }
 
-        let mut bit_signs = vec![];
 
         meta.create_gate("Eltwise 2d", |meta| -> Vec<Expression<F>> {
             let sel = meta.query_selector(selector);
 
             //iterate over all elements to the input
-            let (expressions, bit_signs_col) = eltwise_inter.axis_iter(Self::COLUMN_AXIS).zip(inputs.iter()).zip(outputs.iter()).fold((vec![], vec![]), |(mut expressions, mut bit_signs), ((eltwise_inter, &input), &output)| {
-                let mut eltwise_inter = eltwise_inter.to_vec();
-                let bit_sign_col = eltwise_inter.remove(0);
-                let base: u64 = BASE.try_into().unwrap();
-                assert_eq!(
-                    Self::ADVICE_LEN, eltwise_inter.len(),
-                    "Must pass in sufficient advice columns for eltwise intermediate operations: passed in {}, need {}", 
-                    eltwise_inter.len(), Self::ADVICE_LEN
-                );
+            let expressions = eltwise_inter.axis_iter(Axis(0)).zip(inputs.iter()).zip(outputs.iter()).zip(bit_signs.iter()).fold(vec![], |mut expressions, (((eltwise_inter, &input), &output), &bit_sign)| {
+                let base: u64 = Self::DecompConfig::BASE.try_into().unwrap();
+
                 let input = meta.query_advice(input, Rotation::cur());
                 let output = meta.query_advice(output, Rotation::cur());
-                let bit_sign = meta.query_advice(bit_sign_col, Rotation::cur());
+                let bit_sign = meta.query_advice(bit_sign, Rotation::cur());
                 let iter = eltwise_inter.iter();
                 let base = F::from(base);
                 let word_sum = iter
@@ -107,7 +124,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> ReluNorm2dChip<F, BASE, K> 
                     .unwrap();
     
                 let trunc_sum = iter
-                    .clone().skip(K)
+                    .clone().skip(Self::DecompConfig::K)
                     .enumerate()
                     .map(|(index, column)| {
                         let b = meta.query_advice(*column, Rotation::cur());
@@ -123,40 +140,40 @@ impl<F: FieldExt, const BASE: usize, const K: usize> ReluNorm2dChip<F, BASE, K> 
                         * (bit_sign.clone() * (input.clone() - word_sum.clone())
                             + (constant_1.clone() - bit_sign.clone()) * (input + word_sum)),
                 );
-                expressions.push(sel.clone() * ((bit_sign.clone()*(output.clone() - trunc_sum))+((constant_1 - bit_sign)*(output))));
+                expressions.push(sel.clone() * ((bit_sign.clone()*(output.clone() - trunc_sum.clone()))+((constant_1 - bit_sign)*(output))));
     
-                bit_signs.push(bit_sign_col);
 
-                (expressions, bit_signs)
+                expressions
             });
 
-            bit_signs = bit_signs_col;
             expressions
         });
 
-        ReluNorm2dConfig {
+        ReluNorm2DConfig {
             inputs,
             outputs,
             eltwise_inter,
-            bit_signs: Array1::from_vec(bit_signs),
+            bit_signs,
             selector,
             _marker: PhantomData,
         }
     }
 
-    pub fn add_layer(
+    fn add_layer(
         &self,
         layouter: &mut impl Layouter<F>,
-        inputs: &Array2<AssignedCell<F, F>>,
-    ) -> Result<Array2<AssignedCell<F, F>>, PlonkError> {
-        let base: u128 = BASE.try_into().unwrap();
+        inputs: Array3<AssignedCell<F, F>>,
+        _: ()
+    ) -> Result<Array3<AssignedCell<F, F>>, PlonkError> {
+        let base: u128 = Self::DecompConfig::BASE.try_into().unwrap();
         let config = &self.config;
 
+        let output: Result<Vec<_>, _> = inputs.axis_iter(Self::DEPTH_AXIS).map(|inputs| {
         layouter.assign_region(
             || "apply 2d normalize",
             |mut region| {
                 let outputs = inputs
-                    .axis_iter(Self::ROW_AXIS)
+                    .axis_iter(Axis(1))
                     .enumerate()
                     .map(|(offset, inputs)| {
                         self.config.selector.enable(&mut region, offset)?;
@@ -164,7 +181,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> ReluNorm2dChip<F, BASE, K> 
                             .iter()
                             .zip(config.inputs.iter())
                             .zip(config.outputs.iter())
-                            .zip(config.eltwise_inter.axis_iter(Self::COLUMN_AXIS))
+                            .zip(config.eltwise_inter.axis_iter(Axis(0)))
                             .zip(config.bit_signs.iter())
                             .map(
                                 |(
@@ -220,12 +237,12 @@ impl<F: FieldExt, const BASE: usize, const K: usize> ReluNorm2dChip<F, BASE, K> 
                                         offset,
                                         || bit_sign.map(|x| F::from(x)),
                                     )?;
-                                    let _: Vec<_> = (0..eltwise_inter.len() - 1)
+                                    let _: Vec<_> = (0..eltwise_inter.len())
                                         .map(|index_col| {
                                             region
                                                 .assign_advice(
                                                     || "eltwise_inter word_repr",
-                                                    eltwise_inter[index_col + 1],
+                                                    eltwise_inter[index_col],
                                                     offset,
                                                     || {
                                                         word_repr.clone().map(|x| {
@@ -252,7 +269,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> ReluNorm2dChip<F, BASE, K> 
                                                     F::from_u128(
                                                         x.get_lower_128()
                                                             / u128::try_from(
-                                                                BASE.pow(u32::try_from(K).unwrap()),
+                                                                Self::DecompConfig::BASE.pow(u32::try_from(Self::DecompConfig::K).unwrap()),
                                                             )
                                                             .unwrap(),
                                                     )
@@ -269,7 +286,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> ReluNorm2dChip<F, BASE, K> 
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(stack(
-                    Self::ROW_AXIS,
+                    Axis(1),
                     outputs
                         .iter()
                         .map(|item| item.view())
@@ -278,41 +295,46 @@ impl<F: FieldExt, const BASE: usize, const K: usize> ReluNorm2dChip<F, BASE, K> 
                 )
                 .unwrap())
             },
-        )
+        )}).collect();
+
+        Ok(stack(Axis(0), output?.iter().map(|item| item.view()).collect::<Vec<_>>().as_slice()).unwrap())
     }
+
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::nn_ops::lookup_ops::DecompTable;
+    use crate::nn_ops::{lookup_ops::DecompTable, DefaultDecomp, NNLayer, ColumnAllocator};
 
-    use super::{ReluNorm2dChip, ReluNorm2dConfig};
+    use super::{ReluNorm2DChip, ReluNorm2DConfig, ReluNorm2DChipConfig};
     use halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
         plonk::{
-            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
+            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance, Fixed,
         },
     };
-    use ndarray::{stack, Array, Array1, Array2, Axis, Zip};
+    use ndarray::{stack, Array, Array1, Array2, Axis, Zip, Array3};
 
     #[derive(Clone, Debug)]
     struct ReluNorm2DTestConfig<F: FieldExt> {
-        input: Array1<Column<Instance>>,
-        input_advice: Array1<Column<Advice>>,
-        output: Array1<Column<Instance>>,
-        norm_chip: ReluNorm2dConfig<F>,
-        range_table: DecompTable<F, 1024>,
+        input: Array2<Column<Instance>>,
+        input_advice: Array2<Column<Advice>>,
+        output: Array2<Column<Instance>>,
+        norm_chip: ReluNorm2DConfig<F>,
+        range_table: DecompTable<F, DefaultDecomp>,
     }
 
     struct ReluNorm2DTestCircuit<F: FieldExt> {
-        pub input: Array2<Value<F>>,
+        pub input: Array3<Value<F>>,
     }
 
     const INPUT_WIDTH: usize = 8;
     const INPUT_HEIGHT: usize = 8;
+
+    const DEPTH: usize = 4;
 
     impl<F: FieldExt> Circuit<F> for ReluNorm2DTestCircuit<F> {
         type Config = ReluNorm2DTestConfig<F>;
@@ -321,57 +343,44 @@ mod tests {
 
         fn without_witnesses(&self) -> Self {
             Self {
-                input: Array::from_shape_simple_fn((INPUT_WIDTH, INPUT_HEIGHT), || {
+                input: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH, INPUT_HEIGHT), || {
                     Value::unknown()
                 }),
             }
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            let inputs = Array::from_shape_simple_fn(INPUT_WIDTH, || {
-                let col = meta.advice_column();
-                meta.enable_equality(col);
-                col
-            });
+            let range_table = DecompTable::configure(meta);
 
-            //let output_width = INPUT_WIDTH + PADDING_WIDTH * 2 - KERNAL_WIDTH + 1;
+            let config = ReluNorm2DChipConfig {
+                input_height: INPUT_HEIGHT,
+                input_width: INPUT_WIDTH,
+                input_depth: DEPTH,
+                range_table: range_table.clone(),
+            };
 
-            let outputs = Array::from_shape_simple_fn(INPUT_WIDTH, || {
-                let col = meta.advice_column();
-                meta.enable_equality(col);
-                col
-            });
+            let mut advice_allocator = ColumnAllocator::<Advice>::new(meta, 1);
+            let mut fixed_allocator = ColumnAllocator::<Fixed>::new(meta, 0);
 
-            const ADVICE_LEN: usize = 10;
-
-            let eltwise_inter = Array::from_shape_simple_fn((INPUT_WIDTH, ADVICE_LEN + 1), || {
-                let col = meta.advice_column();
-                meta.enable_equality(col);
-                col
-            });
-
-            let range_table: DecompTable<F, 1024> = DecompTable::configure(meta);
-
-            let norm_chip = ReluNorm2dChip::<_, 1024, 2>::configure(
+            let norm_chip = ReluNorm2DChip::configure(
                 meta,
-                inputs,
-                outputs,
-                eltwise_inter,
-                range_table.clone(),
+                config,
+                &mut advice_allocator,
+                &mut fixed_allocator,
             );
 
             ReluNorm2DTestConfig {
-                input: Array::from_shape_simple_fn(INPUT_WIDTH, || {
+                input: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH), || {
                     let col = meta.instance_column();
                     meta.enable_equality(col);
                     col
                 }),
-                output: Array::from_shape_simple_fn(INPUT_WIDTH, || {
+                output: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH), || {
                     let col = meta.instance_column();
                     meta.enable_equality(col);
                     col
                 }),
-                input_advice: Array::from_shape_simple_fn(INPUT_WIDTH, || {
+                input_advice: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH), || {
                     let col = meta.advice_column();
                     meta.enable_equality(col);
                     col
@@ -386,8 +395,8 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), PlonkError> {
-            let norm_chip: ReluNorm2dChip<F, 1024, 2> =
-                ReluNorm2dChip::construct(config.norm_chip);
+            let norm_chip: ReluNorm2DChip<F> =
+                ReluNorm2DChip::construct(config.norm_chip);
 
             config
                 .range_table
@@ -399,10 +408,10 @@ mod tests {
                     let input = config.input.view();
                     let input_advice = config.input_advice.view();
                     let result = stack(
-                        Axis(1),
+                        Axis(2),
                         &self
                             .input
-                            .axis_iter(Axis(1))
+                            .axis_iter(Axis(2))
                             .enumerate()
                             .map(|(row, slice)| {
                                 Zip::from(slice.view())
@@ -430,9 +439,9 @@ mod tests {
                 },
             )?;
 
-            let output = norm_chip.add_layer(&mut layouter, &inputs)?;
+            let output = norm_chip.add_layer(&mut layouter, inputs, ())?;
             let input = config.output.view();
-            for (row, slice) in output.axis_iter(Axis(1)).enumerate() {
+            for (row, slice) in output.axis_iter(Axis(2)).enumerate() {
                 Zip::from(slice.view())
                     .and(input)
                     .for_each(|input, column| {
@@ -446,16 +455,16 @@ mod tests {
     }
 
     #[test]
-    ///test that a simple 8x8 relu + normalization works
-    fn test_simple_relu() -> Result<(), PlonkError> {
+    ///test that a simple 8x8 normalization works
+    fn test_simple_norm() -> Result<(), PlonkError> {
         let circuit = ReluNorm2DTestCircuit {
-            input: Array::from_shape_simple_fn((INPUT_WIDTH, INPUT_HEIGHT), || {
+            input: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH, INPUT_HEIGHT), || {
                 Value::known(Fr::from(1_048_576).neg())
             }),
         };
 
-        let mut input_instance = vec![vec![Fr::from(1_048_576).neg(); INPUT_HEIGHT]; INPUT_WIDTH];
-        let mut output_instance = vec![vec![Fr::zero(); INPUT_HEIGHT]; INPUT_WIDTH];
+        let mut input_instance = vec![vec![Fr::from(1_048_576).neg(); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
+        let mut output_instance = vec![vec![Fr::zero(); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
 
         input_instance.append(&mut output_instance);
 

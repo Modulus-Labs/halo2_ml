@@ -17,8 +17,8 @@ use ndarray::{
 use crate::{
     felt_from_i64,
     nn_ops::{
-        eltwise_ops::{DecompConfig, EltwiseInstructions, NormalizeChip},
-        lookup_ops::DecompTable,
+        vector_ops::non_linear::eltwise_ops::{DecompConfig, EltwiseInstructions, NormalizeChip},
+        lookup_ops::DecompTable, DefaultDecomp,
     },
 };
 
@@ -79,7 +79,7 @@ impl<F: FieldExt, const BASE: usize> SigmoidChip<F, BASE> {
         ranges: Column<Advice>,
         outputs: Column<Advice>,
         eltwise_inter: Array1<Column<Advice>>,
-        range_table: DecompTable<F, BASE>,
+        range_table: DecompTable<F, DefaultDecomp>,
         norm_chip: DecompConfig<F>,
     ) -> <Self as Chip<F>>::Config {
         let comp_selector = meta.complex_selector();
@@ -358,7 +358,7 @@ impl<F: FieldExt, const BASE: usize> SigmoidChip<F, BASE> {
 mod tests {
     use crate::{
         felt_from_i64,
-        nn_ops::{eltwise_ops::NormalizeChip, lookup_ops::DecompTable},
+        nn_ops::{vector_ops::non_linear::eltwise_ops::NormalizeChip, lookup_ops::DecompTable, DefaultDecomp},
     };
 
     use super::{SigmoidChip, SigmoidConfig};
@@ -379,7 +379,7 @@ mod tests {
         input_advice: Column<Advice>,
         output: Column<Instance>,
         sigmoid_chip: SigmoidConfig<F>,
-        range_table: DecompTable<F, 1024>,
+        range_table: DecompTable<F, DefaultDecomp>,
     }
 
     struct SigmoidTestCircuit<F: FieldExt> {
@@ -428,7 +428,7 @@ mod tests {
                 col
             };
 
-            let range_table: DecompTable<F, 1024> = DecompTable::configure(meta);
+            let range_table: DecompTable<F, DefaultDecomp> = DecompTable::configure(meta);
 
             let norm_chip = NormalizeChip::<_, 1024, 2>::configure(
                 meta,

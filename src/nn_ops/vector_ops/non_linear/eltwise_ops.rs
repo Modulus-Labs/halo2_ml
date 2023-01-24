@@ -10,7 +10,9 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
-use super::lookup_ops::DecompTable;
+use crate::nn_ops::DefaultDecomp;
+
+use super::super::super::lookup_ops::DecompTable;
 
 pub trait EltwiseInstructions<F: FieldExt>: Clone + Debug + Chip<F> {
     ///apply the eltwise operation to an `AssignedCell`
@@ -64,7 +66,7 @@ impl<F: FieldExt, const BASE: usize> ReluChip<F, BASE> {
         input: Column<Advice>,
         mut eltwise_inter: Vec<Column<Advice>>,
         eltwise_output: Column<Advice>,
-        range_table: DecompTable<F, BASE>,
+        range_table: DecompTable<F, DefaultDecomp>,
     ) -> DecompConfig<F> {
         let selector = meta.complex_selector();
 
@@ -270,7 +272,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeChip<F, BASE, K> {
         input: Column<Advice>,
         mut eltwise_inter: Vec<Column<Advice>>,
         eltwise_output: Column<Advice>,
-        range_table: DecompTable<F, BASE>,
+        range_table: DecompTable<F, DefaultDecomp>,
     ) -> DecompConfig<F> {
         let selector = meta.complex_selector();
 
@@ -498,7 +500,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeReluChip<F, BASE, 
         input: Column<Advice>,
         mut eltwise_inter: Vec<Column<Advice>>,
         eltwise_output: Column<Advice>,
-        range_table: DecompTable<F, BASE>,
+        range_table: DecompTable<F, DefaultDecomp>,
     ) -> DecompConfig<F> {
         let selector = meta.complex_selector();
 

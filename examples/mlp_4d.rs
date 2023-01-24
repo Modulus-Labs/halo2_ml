@@ -1,4 +1,4 @@
-use halo2_machinelearning::{nn_chip::LayerParams, NNCircuit};
+use halo2_machinelearning::{nn_ops::vector_ops::linear::fc::FcParams, NNCircuit};
 use halo2_proofs::{
     circuit::Value,
     dev::MockProver,
@@ -24,7 +24,7 @@ fn main() -> () {
     let _profiler = dhat::Profiler::builder().testing().build();
 
     let layers = vec![
-        LayerParams {
+        FcParams {
             weights: vec![1048576; 16]
                 .into_iter()
                 .map(|x: i64| {
@@ -40,7 +40,7 @@ fn main() -> () {
                 .map(|x| Value::known(Fr::from(x)))
                 .collect(),
         },
-        LayerParams {
+        FcParams {
             weights: vec![1048576; 16]
                 .into_iter()
                 .map(|x| Value::known(Fr::from(x)))
@@ -59,6 +59,7 @@ fn main() -> () {
     let circuit = NNCircuit::<Fr> {
         layers,
         input: input.clone(),
+        output: output.clone()
     };
 
     // MockProver::run(11, &circuit, vec![input, output])
@@ -86,6 +87,7 @@ fn main() -> () {
     .unwrap();
 
     println!("Proof took {:?}", now.elapsed().as_secs());
+    println!("done!");
 
     #[cfg(feature = "dhat-heap")]
     {
