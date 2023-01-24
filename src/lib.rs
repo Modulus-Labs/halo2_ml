@@ -88,7 +88,7 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
         let config = FcChipConfig {
             weights_height: INPUT_WIDTH,
             weights_width: 4,
-            elt_config: relu_chip.clone(),
+            elt_config: relu_chip,
         };
 
         let mut advice_allocator = ColumnAllocator::<Advice>::new(meta, 1);
@@ -164,7 +164,7 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
         let output =
             self.layers.iter().zip(layers.iter()).enumerate().fold(
                 Ok(input),
-                |input, (index, (layer, chip))| {
+                |input, (_index, (layer, chip))| {
                     chip.add_layer(&mut layouter, input?, layer.clone())
                 },
             )?;

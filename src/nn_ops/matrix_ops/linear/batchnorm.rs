@@ -3,9 +3,9 @@ use std::marker::PhantomData;
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Fixed},
+    plonk::{Advice, ConstraintSystem, Error as PlonkError, Fixed},
 };
-use ndarray::{stack, Array1, Array2, Array3, Axis};
+use ndarray::{Array1, Array3};
 
 use crate::{
     nn_ops::matrix_ops::linear::dist_addmultadd::DistributedAddMulAddChipParams,
@@ -14,7 +14,7 @@ use crate::{
     },
     nn_ops::{
         matrix_ops::non_linear::norm_2d::{Normalize2dChip, Normalize2dConfig},
-        ColumnAllocator, DecompConfig, InputSizeConfig, NNLayer,
+        ColumnAllocator, InputSizeConfig, NNLayer,
     },
 };
 

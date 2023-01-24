@@ -64,16 +64,14 @@ impl ColumnAllocator<Fixed> {
                 col
             }));
             &self.advice[0..n]
+        } else if self.last_index + n < self.advice.len() {
+            let slice = &self.advice[self.last_index..self.last_index + n];
+            self.last_index += n;
+            slice
         } else {
-            if self.last_index + n < self.advice.len() {
-                let slice = &self.advice[self.last_index..self.last_index + n];
-                self.last_index += n;
-                slice
-            } else {
-                let slice = &self.advice[0..n];
-                self.last_index = n;
-                slice
-            }
+            let slice = &self.advice[0..n];
+            self.last_index = n;
+            slice
         }
     }
 }
@@ -106,16 +104,14 @@ impl ColumnAllocator<Advice> {
                 col
             }));
             &self.advice[0..n]
+        } else if self.last_index + n < self.advice.len() {
+            let slice = &self.advice[self.last_index..self.last_index + n];
+            self.last_index += n;
+            slice
         } else {
-            if self.last_index + n < self.advice.len() {
-                let slice = &self.advice[self.last_index..self.last_index + n];
-                self.last_index += n;
-                slice
-            } else {
-                let slice = &self.advice[0..n];
-                self.last_index = n;
-                slice
-            }
+            let slice = &self.advice[0..n];
+            self.last_index = n;
+            slice
         }
     }
 }

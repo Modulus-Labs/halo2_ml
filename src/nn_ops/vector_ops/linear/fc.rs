@@ -4,8 +4,7 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
-        Advice, Assigned, Column, ConstraintSystem, Error as PlonkError, Expression, Fixed,
-        Instance, Selector,
+        Advice, Column, ConstraintSystem, Error as PlonkError, Expression, Fixed, Selector,
     },
     poly::Rotation,
 };
@@ -177,7 +176,7 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> NNLayer<F> for FcChip<F, Elt> {
                 let offset = 0;
 
                 //assign parameters (weights+biases)
-                let (biases, weights): (Vec<_>, Vec<_>) = ({
+                let (_biases, _weights): (Vec<_>, Vec<_>) = ({
                     let thing: (Result<Vec<_>, _>, Result<Vec<_>, _>) = (
                         layer
                             .biases

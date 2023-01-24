@@ -75,7 +75,7 @@ impl<F: FieldExt> NNLayer<F> for AvgPool2DChip<F> {
         let AvgPool2DChipConfig {
             input_height,
             input_width,
-            input_depth,
+            input_depth: _,
             norm_chip,
         } = config;
 
@@ -115,7 +115,7 @@ impl<F: FieldExt> NNLayer<F> for AvgPool2DChip<F> {
         &self,
         layouter: &mut impl Layouter<F>,
         inputs: Array3<AssignedCell<F, F>>,
-        params: (),
+        _params: (),
     ) -> Result<Array1<AssignedCell<F, F>>, PlonkError> {
         let config = &self.config;
 

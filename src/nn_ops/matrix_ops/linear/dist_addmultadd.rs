@@ -6,7 +6,7 @@ use halo2_proofs::{
     plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Fixed, Selector},
     poly::Rotation,
 };
-use ndarray::{Array, Array1, Array2, Array3, Axis, Zip};
+use ndarray::{Array, Array1, Array2, Array3, Zip};
 
 use crate::nn_ops::{ColumnAllocator, InputSizeConfig, NNLayer};
 
@@ -69,7 +69,7 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddMulAddChip<F> {
     ) -> <Self as Chip<F>>::Config {
         let selector = meta.selector();
         let InputSizeConfig {
-            input_height,
+            input_height: _,
             input_width,
             input_depth,
         } = config;
@@ -116,7 +116,6 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddMulAddChip<F> {
                         })
                         .collect::<Vec<_>>()
                 })
-                .into_iter()
                 .flatten()
                 .collect::<Vec<_>>()
         });

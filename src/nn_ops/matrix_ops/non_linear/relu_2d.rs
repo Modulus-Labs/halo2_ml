@@ -150,7 +150,7 @@ impl<F: FieldExt> NNLayer<F> for ReluNorm2DChip<F> {
                         );
                         expressions.push(
                             sel.clone()
-                                * ((bit_sign.clone() * (output.clone() - trunc_sum.clone()))
+                                * ((bit_sign.clone() * (output.clone() - trunc_sum))
                                     + ((constant_1 - bit_sign) * (output))),
                         );
 

@@ -7,10 +7,10 @@ use halo2_proofs::{
     poly::Rotation,
 };
 use ndarray::{
-    concatenate, stack, Array, Array1, Array2, Array3, Array4, ArrayView3, ArrayView4, Axis, Zip,
+    concatenate, stack, Array, Array1, Array2, Array3, Array4, Axis, Zip,
 };
 
-use crate::nn_ops::{ColumnAllocator, DecompConfig, NNLayer};
+use crate::nn_ops::{ColumnAllocator, NNLayer};
 
 #[derive(Clone, Debug)]
 pub struct Conv3DLayerConfig<F: FieldExt> {
@@ -106,7 +106,7 @@ impl<'a, F: FieldExt> NNLayer<F> for Conv3DLayerChip<F> {
             ker_width,
             padding_width,
             padding_height,
-            c_out_size,
+            c_out_size: _,
         } = config_params;
         let output_width = input_width + padding_width * 2 - ker_width + 1;
         let input_column_count = (input_width + padding_width * 2) * input_depth;
@@ -131,7 +131,6 @@ impl<'a, F: FieldExt> NNLayer<F> for Conv3DLayerChip<F> {
         let kernals = Array::from_shape_vec((input_depth, ker_width), fixed.to_vec()).unwrap();
         let ker_height_i32: i32 = ker_height.try_into().unwrap();
         let selectors: Vec<Selector> = (0..ker_height_i32)
-            .into_iter()
             .map(|offset| {
                 let selector = meta.selector();
                 meta.create_gate("Conv", |meta| -> Vec<Expression<F>> {
@@ -141,7 +140,6 @@ impl<'a, F: FieldExt> NNLayer<F> for Conv3DLayerChip<F> {
                     let inputs: Array3<Expression<F>> = stack(
                         Self::ROW_AXIS,
                         &(0..ker_height_i32)
-                            .into_iter()
                             .map(|index| {
                                 inputs.map(|column| meta.query_advice(*column, Rotation(index)))
                             })
@@ -155,7 +153,6 @@ impl<'a, F: FieldExt> NNLayer<F> for Conv3DLayerChip<F> {
                     let kernals: Array3<Expression<F>> = stack(
                         Self::ROW_AXIS,
                         &(0..ker_height_i32)
-                            .into_iter()
                             .map(|index| {
                                 kernals.map(|column| {
                                     meta.query_fixed(*column, Rotation(index - offset))

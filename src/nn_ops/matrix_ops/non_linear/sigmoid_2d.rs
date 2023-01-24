@@ -204,7 +204,7 @@ impl<F: FieldExt, const BASE: usize> Sigmoid2dChip<F, BASE> {
         let scalar = F::from(Self::SCALAR);
         let additive_bias = F::from(Self::ADDITIVE_BIAS);
 
-        let sigmoid_output = layouter.assign_region(
+        let _sigmoid_output = layouter.assign_region(
             || "apply 2d sigmoid",
             |mut region| {
                 let outputs = inputs

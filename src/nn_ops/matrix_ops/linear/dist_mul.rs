@@ -2,13 +2,13 @@ use std::marker::PhantomData;
 
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{AssignedCell, Chip, Layouter, Value},
+    circuit::{AssignedCell, Chip, Layouter},
     plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Fixed, Selector},
     poly::Rotation,
 };
-use ndarray::{Array, Array1, Array2, Array3, Axis, Zip};
+use ndarray::{Array, Array1, Array2, Array3, Zip};
 
-use crate::nn_ops::{ColumnAllocator, DecompConfig, InputSizeConfig, NNLayer};
+use crate::nn_ops::{ColumnAllocator, InputSizeConfig, NNLayer};
 
 #[derive(Clone, Debug)]
 pub struct DistrubutedMulConfig<F: FieldExt> {
@@ -60,11 +60,11 @@ impl<F: FieldExt> NNLayer<F> for DistrubutedMulChip<F> {
         meta: &mut ConstraintSystem<F>,
         config: InputSizeConfig,
         advice_allocator: &mut ColumnAllocator<Advice>,
-        fixed_allocator: &mut ColumnAllocator<Fixed>,
+        _fixed_allocator: &mut ColumnAllocator<Fixed>,
     ) -> <Self as Chip<F>>::Config {
         let selector = meta.selector();
         let InputSizeConfig {
-            input_height,
+            input_height: _,
             input_width,
             input_depth,
         } = config;
@@ -105,7 +105,6 @@ impl<F: FieldExt> NNLayer<F> for DistrubutedMulChip<F> {
                         })
                         .collect::<Vec<_>>()
                 })
-                .into_iter()
                 .flatten()
                 .collect::<Vec<_>>()
         });
@@ -123,7 +122,7 @@ impl<F: FieldExt> NNLayer<F> for DistrubutedMulChip<F> {
         &self,
         layouter: &mut impl Layouter<F>,
         inputs: (Array3<AssignedCell<F, F>>, Array1<AssignedCell<F, F>>),
-        params: (),
+        _params: (),
     ) -> Result<Array3<AssignedCell<F, F>>, PlonkError> {
         let config = &self.config;
         let (inputs, scalars) = inputs;
