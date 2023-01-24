@@ -4,11 +4,24 @@ pub mod nn_ops;
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{Layouter, SimpleFloorPlanner},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance, Fixed},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Fixed, Instance},
 };
-use nn_ops::{vector_ops::{linear::fc::{FcConfig, FcParams}, non_linear::eltwise_ops::NormalizeReluChip}, DefaultDecomp};
+use nn_ops::{
+    vector_ops::{
+        linear::fc::{FcConfig, FcParams},
+        non_linear::eltwise_ops::NormalizeReluChip,
+    },
+    DefaultDecomp,
+};
 
-use crate::nn_ops::{lookup_ops::DecompTable, vector_ops::{non_linear::eltwise_ops::NormalizeChip, linear::fc::{FcChip, FcChipConfig}}, NNLayer, ColumnAllocator};
+use crate::nn_ops::{
+    lookup_ops::DecompTable,
+    vector_ops::{
+        linear::fc::{FcChip, FcChipConfig},
+        non_linear::eltwise_ops::NormalizeChip,
+    },
+    ColumnAllocator, NNLayer,
+};
 
 pub fn felt_from_i64<F: FieldExt>(x: i64) -> F {
     if x.is_positive() {
@@ -86,13 +99,13 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
                 meta,
                 config.clone(),
                 &mut advice_allocator,
-                &mut fixed_allocator
+                &mut fixed_allocator,
             ),
             FcChip::<_, NormalizeChip<F, 1024, 2>>::configure(
                 meta,
                 config,
                 &mut advice_allocator,
-                &mut fixed_allocator
+                &mut fixed_allocator,
             ),
         ];
 
@@ -130,21 +143,31 @@ impl<F: FieldExt> Circuit<F> for NNCircuit<F> {
         //     self.input.len(),
         // )?;
 
-        let input = layouter.assign_region(|| "load input", |mut region| {
-            self.input.iter().enumerate().map(|(row, _)| {
-                region.assign_advice_from_instance(|| "Load Input", config.input, row, config.input_advice, row)
-            }).collect()
-        })?;
-        let output = self.layers.iter().zip(layers.iter()).enumerate().fold(
-            Ok(input),
-            |input, (index, (layer, chip))| {
-                chip.add_layer(
-                    &mut layouter,
-                    input?, 
-                    layer.clone(),
-                )
+        let input = layouter.assign_region(
+            || "load input",
+            |mut region| {
+                self.input
+                    .iter()
+                    .enumerate()
+                    .map(|(row, _)| {
+                        region.assign_advice_from_instance(
+                            || "Load Input",
+                            config.input,
+                            row,
+                            config.input_advice,
+                            row,
+                        )
+                    })
+                    .collect()
             },
         )?;
+        let output =
+            self.layers.iter().zip(layers.iter()).enumerate().fold(
+                Ok(input),
+                |input, (index, (layer, chip))| {
+                    chip.add_layer(&mut layouter, input?, layer.clone())
+                },
+            )?;
         for (index, cell) in output.into_iter().enumerate() {
             layouter
                 .namespace(|| format!("contrain output at offset {index}"))

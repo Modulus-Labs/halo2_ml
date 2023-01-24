@@ -3,18 +3,13 @@ use std::marker::PhantomData;
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
-    plonk::{
-        Advice, Fixed, Column, ConstraintSystem, Error as PlonkError, Expression,
-        Selector,
-    },
+    plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Expression, Fixed, Selector},
     poly::Rotation,
 };
 
-use ndarray::{
-    stack, Array1, Array2, Axis, Array, Array3,
-};
+use ndarray::{stack, Array, Array1, Array2, Array3, Axis};
 
-use crate::nn_ops::{lookup_ops::DecompTable, NNLayer, DecompConfig, ColumnAllocator};
+use crate::nn_ops::{lookup_ops::DecompTable, ColumnAllocator, DecompConfig, NNLayer};
 
 #[derive(Clone, Debug)]
 pub struct Normalize2dConfig<F: FieldExt> {
@@ -71,25 +66,29 @@ impl<F: FieldExt> NNLayer<F> for Normalize2dChip<F> {
         meta: &mut ConstraintSystem<F>,
         config: Self::ConfigParams,
         advice_allocator: &mut ColumnAllocator<Advice>,
-        _: &mut ColumnAllocator<Fixed>
-        // inputs: Array1<Column<Advice>>,
-        // outputs: Array1<Column<Advice>>,
-        // eltwise_inter: Array2<Column<Advice>>,
-        // range_table: DecompTable<F, { Self::DecompConfig::BASE }>,
+        _: &mut ColumnAllocator<Fixed>, // inputs: Array1<Column<Advice>>,
+                                        // outputs: Array1<Column<Advice>>,
+                                        // eltwise_inter: Array2<Column<Advice>>,
+                                        // range_table: DecompTable<F, { Self::DecompConfig::BASE }>,
     ) -> <Self as Chip<F>>::Config {
         let selector = meta.complex_selector();
         let input_width = config.input_width;
         let range_table = config.range_table;
 
-        let advice = advice_allocator.take(meta, config.input_width * (2 + Self::DecompConfig::ADVICE_LEN + 1));
+        let advice = advice_allocator.take(
+            meta,
+            config.input_width * (2 + Self::DecompConfig::ADVICE_LEN + 1),
+        );
         let inputs = Array1::from_vec(advice[0..input_width].to_vec());
-        let outputs = Array1::from_vec(advice[input_width..input_width*2].to_vec());
+        let outputs = Array1::from_vec(advice[input_width..input_width * 2].to_vec());
 
-        let bit_signs = Array1::from_vec(advice[input_width*2..input_width*3].to_vec());
+        let bit_signs = Array1::from_vec(advice[input_width * 2..input_width * 3].to_vec());
 
-        let eltwise_inter = advice[input_width*3..advice.len()].to_vec();
+        let eltwise_inter = advice[input_width * 3..advice.len()].to_vec();
 
-        let eltwise_inter = Array::from_shape_vec((input_width, Self::DecompConfig::ADVICE_LEN), eltwise_inter).unwrap();
+        let eltwise_inter =
+            Array::from_shape_vec((input_width, Self::DecompConfig::ADVICE_LEN), eltwise_inter)
+                .unwrap();
 
         for &item in eltwise_inter.iter() {
             meta.lookup("lookup", |meta| {
@@ -99,52 +98,65 @@ impl<F: FieldExt> NNLayer<F> for Normalize2dChip<F> {
             });
         }
 
-
         meta.create_gate("Eltwise 2d", |meta| -> Vec<Expression<F>> {
             let sel = meta.query_selector(selector);
 
             //iterate over all elements to the input
-            let expressions = eltwise_inter.axis_iter(Axis(0)).zip(inputs.iter()).zip(outputs.iter()).zip(bit_signs.iter()).fold(vec![], |mut expressions, (((eltwise_inter, &input), &output), &bit_sign)| {
-                let base: u64 = Self::DecompConfig::BASE.try_into().unwrap();
+            let expressions = eltwise_inter
+                .axis_iter(Axis(0))
+                .zip(inputs.iter())
+                .zip(outputs.iter())
+                .zip(bit_signs.iter())
+                .fold(
+                    vec![],
+                    |mut expressions, (((eltwise_inter, &input), &output), &bit_sign)| {
+                        let base: u64 = Self::DecompConfig::BASE.try_into().unwrap();
 
-                let input = meta.query_advice(input, Rotation::cur());
-                let output = meta.query_advice(output, Rotation::cur());
-                let bit_sign = meta.query_advice(bit_sign, Rotation::cur());
-                let iter = eltwise_inter.iter();
-                let base = F::from(base);
-                let word_sum = iter
-                    .clone()
-                    .enumerate()
-                    .map(|(index, column)| {
-                        let b = meta.query_advice(*column, Rotation::cur());
-                        let true_base = (0..index).fold(F::from(1), |expr, _input| expr * base);
-                        b * true_base
-                    })
-                    .reduce(|accum, item| accum + item)
-                    .unwrap();
-    
-                let trunc_sum = iter
-                    .clone().skip(Self::DecompConfig::K)
-                    .enumerate()
-                    .map(|(index, column)| {
-                        let b = meta.query_advice(*column, Rotation::cur());
-                        let true_base = (0..index).fold(F::from(1), |expr, _input| expr * base);
-                        b * true_base
-                    })
-                    .reduce(|accum, item| accum + item)
-                    .unwrap();
-    
-                let constant_1 = Expression::Constant(F::from(1));
-                expressions.push(
-                    sel.clone()
-                        * (bit_sign.clone() * (input.clone() - word_sum.clone())
-                            + (constant_1.clone() - bit_sign.clone()) * (input + word_sum)),
+                        let input = meta.query_advice(input, Rotation::cur());
+                        let output = meta.query_advice(output, Rotation::cur());
+                        let bit_sign = meta.query_advice(bit_sign, Rotation::cur());
+                        let iter = eltwise_inter.iter();
+                        let base = F::from(base);
+                        let word_sum = iter
+                            .clone()
+                            .enumerate()
+                            .map(|(index, column)| {
+                                let b = meta.query_advice(*column, Rotation::cur());
+                                let true_base =
+                                    (0..index).fold(F::from(1), |expr, _input| expr * base);
+                                b * true_base
+                            })
+                            .reduce(|accum, item| accum + item)
+                            .unwrap();
+
+                        let trunc_sum = iter
+                            .clone()
+                            .skip(Self::DecompConfig::K)
+                            .enumerate()
+                            .map(|(index, column)| {
+                                let b = meta.query_advice(*column, Rotation::cur());
+                                let true_base =
+                                    (0..index).fold(F::from(1), |expr, _input| expr * base);
+                                b * true_base
+                            })
+                            .reduce(|accum, item| accum + item)
+                            .unwrap();
+
+                        let constant_1 = Expression::Constant(F::from(1));
+                        expressions.push(
+                            sel.clone()
+                                * (bit_sign.clone() * (input.clone() - word_sum.clone())
+                                    + (constant_1.clone() - bit_sign.clone()) * (input + word_sum)),
+                        );
+                        expressions.push(
+                            sel.clone()
+                                * ((bit_sign.clone() * (output.clone() - trunc_sum.clone()))
+                                    + ((constant_1 - bit_sign) * (output + trunc_sum))),
+                        );
+
+                        expressions
+                    },
                 );
-                expressions.push(sel.clone() * ((bit_sign.clone()*(output.clone() - trunc_sum.clone()))+((constant_1 - bit_sign)*(output + trunc_sum))));
-    
-
-                expressions
-            });
 
             expressions
         });
@@ -163,7 +175,7 @@ impl<F: FieldExt> NNLayer<F> for Normalize2dChip<F> {
         &self,
         layouter: &mut impl Layouter<F>,
         inputs: Array3<AssignedCell<F, F>>,
-        _: ()
+        _: (),
     ) -> Result<Array3<AssignedCell<F, F>>, PlonkError> {
         let base: u128 = Self::DecompConfig::BASE.try_into().unwrap();
         let config = &self.config;
@@ -304,14 +316,24 @@ impl<F: FieldExt> NNLayer<F> for Normalize2dChip<F> {
             },
         )}).collect();
 
-        Ok(stack(Axis(0), output?.iter().map(|item| item.view()).collect::<Vec<_>>().as_slice()).unwrap())
+        Ok(stack(
+            Axis(0),
+            output?
+                .iter()
+                .map(|item| item.view())
+                .collect::<Vec<_>>()
+                .as_slice(),
+        )
+        .unwrap())
     }
-
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::nn_ops::{lookup_ops::DecompTable, DefaultDecomp, matrix_ops::non_linear::norm_2d::Normalize2DChipConfig, NNLayer, ColumnAllocator};
+    use crate::nn_ops::{
+        lookup_ops::DecompTable, matrix_ops::non_linear::norm_2d::Normalize2DChipConfig,
+        ColumnAllocator, DefaultDecomp, NNLayer,
+    };
 
     use super::{Normalize2dChip, Normalize2dConfig};
     use halo2_curves::bn256::Bn256;
@@ -321,10 +343,16 @@ mod tests {
         dev::MockProver,
         halo2curves::bn256::Fr,
         plonk::{
-            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance, Fixed, keygen_vk, keygen_pk, create_proof,
-        }, poly::{kzg::{commitment::ParamsKZG, multiopen::ProverSHPLONK}, commitment::ParamsProver}, transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},
+            create_proof, keygen_pk, keygen_vk, Advice, Circuit, Column, ConstraintSystem,
+            Error as PlonkError, Fixed, Instance,
+        },
+        poly::{
+            commitment::ParamsProver,
+            kzg::{commitment::ParamsKZG, multiopen::ProverSHPLONK},
+        },
+        transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},
     };
-    use ndarray::{stack, Array, Array1, Array2, Axis, Zip, Array3};
+    use ndarray::{stack, Array, Array1, Array2, Array3, Axis, Zip};
     use rand::rngs::OsRng;
 
     #[derive(Clone, Debug)]
@@ -404,8 +432,7 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), PlonkError> {
-            let norm_chip: Normalize2dChip<F> =
-                Normalize2dChip::construct(config.norm_chip);
+            let norm_chip: Normalize2dChip<F> = Normalize2dChip::construct(config.norm_chip);
 
             config
                 .range_table
@@ -505,7 +532,6 @@ mod tests {
         //     OsRng,
         //     &mut transcript,
         // )?;
-
 
         Ok(())
     }

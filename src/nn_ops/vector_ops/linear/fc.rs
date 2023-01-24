@@ -4,13 +4,16 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
-        Advice, Fixed, Assigned, Column, ConstraintSystem, Error as PlonkError, Expression, Instance,
-        Selector,
+        Advice, Assigned, Column, ConstraintSystem, Error as PlonkError, Expression, Fixed,
+        Instance, Selector,
     },
     poly::Rotation,
 };
 
-use crate::nn_ops::{vector_ops::non_linear::eltwise_ops::{DecompConfig, EltwiseInstructions}, NNLayer, ColumnAllocator};
+use crate::nn_ops::{
+    vector_ops::non_linear::eltwise_ops::{DecompConfig, EltwiseInstructions},
+    ColumnAllocator, NNLayer,
+};
 
 #[derive(Default, Clone, Debug)]
 pub struct FcParams<F: FieldExt> {
@@ -62,7 +65,6 @@ pub struct FcChipConfig<F: FieldExt> {
 }
 
 impl<F: FieldExt, Elt: EltwiseInstructions<F>> NNLayer<F> for FcChip<F, Elt> {
-
     type ConfigParams = FcChipConfig<F>;
 
     type LayerInput = Vec<AssignedCell<F, F>>;
@@ -82,9 +84,13 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> NNLayer<F> for FcChip<F, Elt> {
         meta: &mut ConstraintSystem<F>,
         config: FcChipConfig<F>,
         advice_allocator: &mut ColumnAllocator<Advice>,
-        fixed_allocator: &mut ColumnAllocator<Fixed>
+        fixed_allocator: &mut ColumnAllocator<Fixed>,
     ) -> <Self as Chip<F>>::Config {
-        let FcChipConfig { weights_height: height, weights_width: width, elt_config } = config;
+        let FcChipConfig {
+            weights_height: height,
+            weights_width: width,
+            elt_config,
+        } = config;
 
         let advice = advice_allocator.take(meta, width + 1);
         let fixed = fixed_allocator.take(meta, width + 1);
@@ -215,8 +221,7 @@ impl<F: FieldExt, Elt: EltwiseInstructions<F>> NNLayer<F> for FcChip<F, Elt> {
                         .map(|i| {
                             let mut o: Value<F> = Value::known(F::zero());
                             for (j, x) in inputs.iter().enumerate() {
-                                o = o + layer.weights[j + (i * config.width)]
-                                    * x.value();
+                                o = o + layer.weights[j + (i * config.width)] * x.value();
                             }
                             o + layer.biases[i]
                         })

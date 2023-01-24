@@ -59,7 +59,7 @@ fn main() -> () {
     let circuit = NNCircuit::<Fr> {
         layers,
         input: input.clone(),
-        output: output.clone()
+        output: output.clone(),
     };
 
     // MockProver::run(11, &circuit, vec![input, output])

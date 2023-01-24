@@ -3,22 +3,18 @@ use std::marker::PhantomData;
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
-    plonk::{
-        Advice, Column, ConstraintSystem, Error as PlonkError, Expression,
-        Selector,
-    },
+    plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Expression, Selector},
     poly::Rotation,
 };
 
-use ndarray::{
-    Array, Array1, Axis,
-};
+use ndarray::{Array, Array1, Axis};
 
 use crate::{
     felt_from_i64,
     nn_ops::{
+        lookup_ops::DecompTable,
         vector_ops::non_linear::eltwise_ops::{DecompConfig, EltwiseInstructions, NormalizeChip},
-        lookup_ops::DecompTable, DefaultDecomp,
+        DefaultDecomp,
     },
 };
 
@@ -358,7 +354,10 @@ impl<F: FieldExt, const BASE: usize> SigmoidChip<F, BASE> {
 mod tests {
     use crate::{
         felt_from_i64,
-        nn_ops::{vector_ops::non_linear::eltwise_ops::NormalizeChip, lookup_ops::DecompTable, DefaultDecomp},
+        nn_ops::{
+            lookup_ops::DecompTable, vector_ops::non_linear::eltwise_ops::NormalizeChip,
+            DefaultDecomp,
+        },
     };
 
     use super::{SigmoidChip, SigmoidConfig};
@@ -367,9 +366,7 @@ mod tests {
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
-        plonk::{
-            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
-        },
+        plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance},
     };
     use ndarray::{Array, Array1, Zip};
 

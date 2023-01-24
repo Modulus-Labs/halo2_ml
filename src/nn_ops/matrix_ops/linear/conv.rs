@@ -1,19 +1,16 @@
-use std::marker::{PhantomData};
+use std::marker::PhantomData;
 
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
-    plonk::{
-        Advice, Column, ConstraintSystem, Error as PlonkError, Expression,
-        Selector, Fixed,
-    },
+    plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Expression, Fixed, Selector},
     poly::Rotation,
 };
 use ndarray::{
-    concatenate, stack, Array, Array1, Array2, Array3, Array4, Axis, Zip, ArrayView3, ArrayView4,
+    concatenate, stack, Array, Array1, Array2, Array3, Array4, ArrayView3, ArrayView4, Axis, Zip,
 };
 
-use crate::nn_ops::{DecompConfig, NNLayer, ColumnAllocator};
+use crate::nn_ops::{ColumnAllocator, DecompConfig, NNLayer};
 
 #[derive(Clone, Debug)]
 pub struct Conv3DLayerConfig<F: FieldExt> {
@@ -101,11 +98,18 @@ impl<'a, F: FieldExt> NNLayer<F> for Conv3DLayerChip<F> {
         advice_allocator: &mut ColumnAllocator<Advice>,
         fixed_allocator: &mut ColumnAllocator<Fixed>,
     ) -> <Self as Chip<F>>::Config {
-        let Conv3DLayerConfigParams{
-            input_height: _, input_width, input_depth, ker_height, ker_width, padding_width, padding_height, c_out_size
+        let Conv3DLayerConfigParams {
+            input_height: _,
+            input_width,
+            input_depth,
+            ker_height,
+            ker_width,
+            padding_width,
+            padding_height,
+            c_out_size,
         } = config_params;
         let output_width = input_width + padding_width * 2 - ker_width + 1;
-        let input_column_count = (input_width + padding_width*2)*input_depth;
+        let input_column_count = (input_width + padding_width * 2) * input_depth;
         let output_column_count = output_width;
         let advice_count = input_column_count + output_column_count;
         let fixed_count = ker_width * input_depth;
@@ -113,8 +117,16 @@ impl<'a, F: FieldExt> NNLayer<F> for Conv3DLayerChip<F> {
         let advice = advice_allocator.take(meta, advice_count);
         let fixed = fixed_allocator.take(meta, fixed_count);
 
-        let inputs = Array::from_shape_vec((input_depth, (input_width + padding_width*2)), advice[0..input_column_count].to_vec()).unwrap();
-        let outputs = Array::from_shape_vec(output_width, advice[input_column_count..input_column_count + output_column_count].to_vec()).unwrap();
+        let inputs = Array::from_shape_vec(
+            (input_depth, (input_width + padding_width * 2)),
+            advice[0..input_column_count].to_vec(),
+        )
+        .unwrap();
+        let outputs = Array::from_shape_vec(
+            output_width,
+            advice[input_column_count..input_column_count + output_column_count].to_vec(),
+        )
+        .unwrap();
 
         let kernals = Array::from_shape_vec((input_depth, ker_width), fixed.to_vec()).unwrap();
         let ker_height_i32: i32 = ker_height.try_into().unwrap();
@@ -200,7 +212,7 @@ impl<'a, F: FieldExt> NNLayer<F> for Conv3DLayerChip<F> {
         &self,
         layouter: &mut impl Layouter<F>,
         inputs: Array3<AssignedCell<F, F>>,
-        layer_params: Conv3DLayerParams<F>
+        layer_params: Conv3DLayerParams<F>,
     ) -> Result<Array3<AssignedCell<F, F>>, PlonkError> {
         let Conv3DLayerParams { kernals } = layer_params;
 
@@ -252,27 +264,25 @@ impl<'a, F: FieldExt> NNLayer<F> for Conv3DLayerChip<F> {
                             .enumerate()
                             .for_each(|(row, inputs)| {
                                 Zip::from(inputs).and(config.inputs.view()).for_each(
-                                    |input, column| {
-                                        match input {
-                                            InputOrPadding::Input(x) => {
-                                                x.copy_advice(
-                                                    || "Copy Input",
-                                                    &mut region,
+                                    |input, column| match input {
+                                        InputOrPadding::Input(x) => {
+                                            x.copy_advice(
+                                                || "Copy Input",
+                                                &mut region,
+                                                *column,
+                                                row,
+                                            )
+                                            .unwrap();
+                                        }
+                                        InputOrPadding::Padding => {
+                                            region
+                                                .assign_advice(
+                                                    || "Add Padding",
                                                     *column,
                                                     row,
+                                                    || Value::known(F::zero()),
                                                 )
                                                 .unwrap();
-                                            }
-                                            InputOrPadding::Padding => {
-                                                region
-                                                    .assign_advice(
-                                                        || "Add Padding",
-                                                        *column,
-                                                        row,
-                                                        || Value::known(F::zero()),
-                                                    )
-                                                    .unwrap();
-                                            }
                                         }
                                     },
                                 );
@@ -362,12 +372,11 @@ impl<'a, F: FieldExt> NNLayer<F> for Conv3DLayerChip<F> {
         )
         .unwrap())
     }
-
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::nn_ops::{DefaultDecomp, NNLayer, ColumnAllocator};
+    use crate::nn_ops::{ColumnAllocator, DefaultDecomp, NNLayer};
 
     use super::{Conv3DLayerChip, Conv3DLayerConfig, Conv3DLayerConfigParams, Conv3DLayerParams};
     use halo2_proofs::{
@@ -375,9 +384,7 @@ mod tests {
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
-        plonk::{
-            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance, Fixed,
-        },
+        plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Fixed, Instance},
     };
     use ndarray::{stack, Array, Array2, Array3, Array4, Axis, Zip};
 
@@ -597,11 +604,10 @@ mod tests {
             row,
             edge,
         ];
-        let mut output_instance: Vec<_> =
-            vec![layer.clone(), layer.clone(), layer.clone(), layer]
-                .into_iter()
-                .flatten()
-                .collect();
+        let mut output_instance: Vec<_> = vec![layer.clone(), layer.clone(), layer.clone(), layer]
+            .into_iter()
+            .flatten()
+            .collect();
         input_instance.append(&mut output_instance);
 
         MockProver::run(7, &circuit, input_instance)

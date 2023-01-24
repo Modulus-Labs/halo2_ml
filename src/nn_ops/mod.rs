@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{Chip, Layouter},
-    plonk::{Advice, Column, ConstraintSystem, ColumnType, Fixed, Error as PlonkError},
+    plonk::{Advice, Column, ColumnType, ConstraintSystem, Error as PlonkError, Fixed},
 };
 use ndarray::Axis;
 
@@ -29,7 +29,7 @@ impl DecompConfig for DefaultDecomp {
 }
 
 ///Convience wrapper for keeping track of columns
-/// 
+///
 /// Not particularly efficient; Efficiency will depend on order of requests
 pub struct ColumnAllocator<C: ColumnType> {
     advice: Vec<Column<C>>,
@@ -38,11 +38,13 @@ pub struct ColumnAllocator<C: ColumnType> {
 
 impl ColumnAllocator<Fixed> {
     pub fn new<F: FieldExt>(meta: &mut ConstraintSystem<F>, max_advice_count: usize) -> Self {
-        let advice = (0..max_advice_count).map(|_| {
-            let col = meta.fixed_column();
-            meta.enable_equality(col);
-            col
-        }).collect();
+        let advice = (0..max_advice_count)
+            .map(|_| {
+                let col = meta.fixed_column();
+                meta.enable_equality(col);
+                col
+            })
+            .collect();
 
         ColumnAllocator {
             advice,
@@ -50,35 +52,41 @@ impl ColumnAllocator<Fixed> {
         }
     }
 
-    pub fn take<F: FieldExt>(&mut self, meta: &mut ConstraintSystem<F>, n: usize) -> &[Column<Fixed>] {
+    pub fn take<F: FieldExt>(
+        &mut self,
+        meta: &mut ConstraintSystem<F>,
+        n: usize,
+    ) -> &[Column<Fixed>] {
         if n > self.advice.len() {
             self.advice.extend((0..n - self.advice.len()).map(|_| {
                 let col = meta.fixed_column();
                 meta.enable_equality(col);
-                col    
+                col
             }));
             &self.advice[0..n]
         } else {
             if self.last_index + n < self.advice.len() {
-                let slice = &self.advice[self.last_index..self.last_index+n];
+                let slice = &self.advice[self.last_index..self.last_index + n];
                 self.last_index += n;
                 slice
             } else {
                 let slice = &self.advice[0..n];
                 self.last_index = n;
                 slice
-            }    
+            }
         }
     }
 }
 
 impl ColumnAllocator<Advice> {
     pub fn new<F: FieldExt>(meta: &mut ConstraintSystem<F>, max_advice_count: usize) -> Self {
-        let advice = (0..max_advice_count).map(|_| {
-            let col = meta.advice_column();
-            meta.enable_equality(col);
-            col
-        }).collect();
+        let advice = (0..max_advice_count)
+            .map(|_| {
+                let col = meta.advice_column();
+                meta.enable_equality(col);
+                col
+            })
+            .collect();
 
         ColumnAllocator {
             advice,
@@ -86,24 +94,28 @@ impl ColumnAllocator<Advice> {
         }
     }
 
-    pub fn take<F: FieldExt>(&mut self, meta: &mut ConstraintSystem<F> ,n: usize) -> &[Column<Advice>] {
+    pub fn take<F: FieldExt>(
+        &mut self,
+        meta: &mut ConstraintSystem<F>,
+        n: usize,
+    ) -> &[Column<Advice>] {
         if n > self.advice.len() {
             self.advice.extend((0..n - self.advice.len()).map(|_| {
                 let col = meta.advice_column();
                 meta.enable_equality(col);
-                col    
+                col
             }));
             &self.advice[0..n]
         } else {
             if self.last_index + n < self.advice.len() {
-                let slice = &self.advice[self.last_index..self.last_index+n];
+                let slice = &self.advice[self.last_index..self.last_index + n];
                 self.last_index += n;
                 slice
             } else {
                 let slice = &self.advice[0..n];
                 self.last_index = n;
                 slice
-            }    
+            }
         }
     }
 }
@@ -111,7 +123,7 @@ impl ColumnAllocator<Advice> {
 pub struct InputSizeConfig {
     input_height: usize,
     input_width: usize,
-    input_depth: usize
+    input_depth: usize,
 }
 
 pub trait NNLayer<F: FieldExt>: Chip<F> {
@@ -136,5 +148,10 @@ pub trait NNLayer<F: FieldExt>: Chip<F> {
         fixed_allocator: &mut ColumnAllocator<Fixed>,
     ) -> <Self as Chip<F>>::Config;
 
-    fn add_layer(&self, layouter: &mut impl Layouter<F>, input: Self::LayerInput, layer_params: Self::LayerParams) -> Result<Self::LayerOutput, PlonkError>;
+    fn add_layer(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        input: Self::LayerInput,
+        layer_params: Self::LayerParams,
+    ) -> Result<Self::LayerOutput, PlonkError>;
 }

@@ -3,21 +3,19 @@ use std::marker::PhantomData;
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
-    plonk::{
-        Advice, Column, ConstraintSystem, Error as PlonkError, Expression,
-        Selector,
-    },
+    plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Expression, Selector},
     poly::Rotation,
 };
 
-use ndarray::{
-    stack, Array1, Array2, Axis,
-};
+use ndarray::{stack, Array1, Array2, Axis};
 
 use crate::{
-    nn_ops::{matrix_ops::non_linear::norm_2d::{Normalize2dChip, Normalize2dConfig}, NNLayer},
     felt_from_i64,
     nn_ops::{lookup_ops::DecompTable, DefaultDecomp},
+    nn_ops::{
+        matrix_ops::non_linear::norm_2d::{Normalize2dChip, Normalize2dConfig},
+        NNLayer,
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -131,7 +129,6 @@ impl<F: FieldExt, const BASE: usize> Sigmoid2dChip<F, BASE> {
                     .unwrap();
 
                 let comp = meta.query_advice(ranges, Rotation::cur());
-    
                 let constant_1 = Expression::Constant(F::from(1));
                 expressions.push(
                     sel.clone() * (word_sum - ((comp_sign.clone() * (input.clone() - comp.clone())) + ((constant_1-comp_sign) * (comp - input))))
@@ -407,7 +404,11 @@ impl<F: FieldExt, const BASE: usize> Sigmoid2dChip<F, BASE> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{nn_ops::{matrix_ops::non_linear::norm_2d::Normalize2dChip, NNLayer}, felt_from_i64, nn_ops::{lookup_ops::DecompTable, DefaultDecomp}};
+    use crate::{
+        felt_from_i64,
+        nn_ops::{lookup_ops::DecompTable, DefaultDecomp},
+        nn_ops::{matrix_ops::non_linear::norm_2d::Normalize2dChip, NNLayer},
+    };
 
     use super::{Sigmoid2dChip, Sigmoid2dConfig};
     use halo2_proofs::{
@@ -415,9 +416,7 @@ mod tests {
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
-        plonk::{
-            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
-        },
+        plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance},
     };
     use ndarray::{stack, Array, Array1, Array2, Axis, Zip};
 
@@ -481,12 +480,7 @@ mod tests {
 
             let range_table: DecompTable<F, DefaultDecomp> = DecompTable::configure(meta);
 
-            let norm_chip = Normalize2dChip::configure(
-                meta,
-                todo!(),
-                todo!(),
-                todo!(),
-            );
+            let norm_chip = Normalize2dChip::configure(meta, todo!(), todo!(), todo!());
 
             let sigmoid_chip = Sigmoid2dChip::<_, 1024>::configure(
                 meta,

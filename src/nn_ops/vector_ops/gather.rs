@@ -1,25 +1,26 @@
 use halo2_curves::FieldExt;
-use halo2_proofs::circuit::{AssignedCell};
+use halo2_proofs::circuit::AssignedCell;
 use ndarray::Array1;
 
-pub fn gather<F: FieldExt>(inputs: Array1<AssignedCell<F, F>>, index_map: Array1<usize>) -> Array1<AssignedCell<F, F>> {
-    index_map.iter().map(|&index| {
-        inputs.get(index).unwrap().clone()
-    }).collect()
+pub fn gather<F: FieldExt>(
+    inputs: Array1<AssignedCell<F, F>>,
+    index_map: Array1<usize>,
+) -> Array1<AssignedCell<F, F>> {
+    index_map
+        .iter()
+        .map(|&index| inputs.get(index).unwrap().clone())
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    
 
     use halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
-        plonk::{
-            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance,
-        },
+        plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance},
     };
     use ndarray::{Array, Array1, Zip};
     use std::marker::PhantomData;
@@ -36,7 +37,7 @@ mod tests {
 
     struct GatherTestCircuit<F: FieldExt> {
         pub input: Array1<Value<F>>,
-        pub gather_indicies: Array1<usize>
+        pub gather_indicies: Array1<usize>,
     }
 
     const INPUT_SIZE: usize = 12;
@@ -50,7 +51,7 @@ mod tests {
         fn without_witnesses(&self) -> Self {
             Self {
                 input: Array::from_shape_simple_fn(INPUT_SIZE, || Value::unknown()),
-                gather_indicies: Array::from_shape_fn(OUTPUT_SIZE, |x| x)
+                gather_indicies: Array::from_shape_fn(OUTPUT_SIZE, |x| x),
             }
         }
 
@@ -71,7 +72,7 @@ mod tests {
                     meta.enable_equality(col);
                     col
                 },
-                _marker: PhantomData
+                _marker: PhantomData,
             }
         }
 
@@ -111,9 +112,7 @@ mod tests {
         }
     }
 
-    const TEST_OUTPUT: [u64; OUTPUT_SIZE] = [
-        2, 8, 4, 1, 7
-    ];
+    const TEST_OUTPUT: [u64; OUTPUT_SIZE] = [2, 8, 4, 1, 7];
 
     #[test]
     ///test that a simple 8x8 sigmoid works
@@ -126,7 +125,7 @@ mod tests {
 
         let circuit = GatherTestCircuit {
             input: Zip::from(input.view()).map_collect(|&input| Value::known(input)),
-            gather_indicies
+            gather_indicies,
         };
 
         let input_instance: Vec<_> = vec![input.to_vec(), output.to_vec()];

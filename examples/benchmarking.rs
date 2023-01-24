@@ -188,8 +188,7 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
                     .unwrap()
                 });
                 let inter = chip.add_layers(
-                    layouter
-                        .namespace(|| format!("running layer {index}; definintion: {key:?}")),
+                    layouter.namespace(|| format!("running layer {index}; definintion: {key:?}")),
                     inter,
                     layer,
                 )?;
@@ -208,8 +207,7 @@ impl<F: FieldExt, const NETWORK: NetworkArch, const MAX_MAT_WIDTH: usize> Circui
                     .unwrap()
                 });
                 let inter = chip.add_layers(
-                    layouter
-                        .namespace(|| format!("running layer {index}; definintion: {key:?}")),
+                    layouter.namespace(|| format!("running layer {index}; definintion: {key:?}")),
                     inter,
                     layer,
                 )?;

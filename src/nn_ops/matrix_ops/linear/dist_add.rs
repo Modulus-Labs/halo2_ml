@@ -3,17 +3,12 @@ use std::marker::PhantomData;
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
-    plonk::{
-        Advice, Fixed, Column, ConstraintSystem, Error as PlonkError,
-        Selector,
-    },
+    plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Fixed, Selector},
     poly::Rotation,
 };
-use ndarray::{
-    Array1, Array2, Array3, Axis, Zip, Array,
-};
+use ndarray::{Array, Array1, Array2, Array3, Axis, Zip};
 
-use crate::nn_ops::{NNLayer, ColumnAllocator, InputSizeConfig};
+use crate::nn_ops::{ColumnAllocator, InputSizeConfig, NNLayer};
 
 #[derive(Clone, Debug)]
 pub struct DistributedAddConfig<F: FieldExt> {
@@ -67,13 +62,30 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddChip<F> {
         advice_allocator: &mut ColumnAllocator<Advice>,
         fixed_allocator: &mut ColumnAllocator<Fixed>,
     ) -> <Self as Chip<F>>::Config {
-        let InputSizeConfig { input_height, input_width, input_depth } = config;
-        let advice = advice_allocator.take(meta, input_depth*input_width*2 + input_depth);
+        let InputSizeConfig {
+            input_height,
+            input_width,
+            input_depth,
+        } = config;
+        let advice = advice_allocator.take(meta, input_depth * input_width * 2 + input_depth);
 
-        let inputs = Array::from_shape_vec((input_depth, input_width), advice[0..(input_depth*input_width)].to_vec()).unwrap();
-        let outputs = Array::from_shape_vec((input_depth, input_width), advice[(input_depth*input_width)..(input_depth*input_width)*2].to_vec()).unwrap();
+        let inputs = Array::from_shape_vec(
+            (input_depth, input_width),
+            advice[0..(input_depth * input_width)].to_vec(),
+        )
+        .unwrap();
+        let outputs = Array::from_shape_vec(
+            (input_depth, input_width),
+            advice[(input_depth * input_width)..(input_depth * input_width) * 2].to_vec(),
+        )
+        .unwrap();
 
-        let scalars = Array::from_shape_vec(input_depth, advice[(input_depth*input_width)*2..(input_depth*input_width)*2 + input_depth].to_vec()).unwrap();
+        let scalars = Array::from_shape_vec(
+            input_depth,
+            advice[(input_depth * input_width) * 2..(input_depth * input_width) * 2 + input_depth]
+                .to_vec(),
+        )
+        .unwrap();
 
         let selector = meta.selector();
         meta.create_gate("Dist Add", |meta| {
@@ -145,7 +157,9 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddChip<F> {
                             // region
                             //     .assign_advice(|| "Assign Scalar", column, row, || scalar)
                             //     .unwrap();
-                            scalar.copy_advice(|| "Copy Scalar", &mut region, column, row).unwrap();
+                            scalar
+                                .copy_advice(|| "Copy Scalar", &mut region, column, row)
+                                .unwrap();
                         }
                     });
 
@@ -156,7 +170,8 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddChip<F> {
                 // }))
                 Ok(
                     Zip::indexed(inputs.view()).map_collect(|(channel, column, row), input| {
-                        let output = scalars.get(channel).unwrap().value().map(|f| *f) + input.value();
+                        let output =
+                            scalars.get(channel).unwrap().value().map(|f| *f) + input.value();
                         config.selector.enable(&mut region, row).unwrap();
                         region
                             .assign_advice(
@@ -175,7 +190,7 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddChip<F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::nn_ops::{NNLayer, ColumnAllocator};
+    use crate::nn_ops::{ColumnAllocator, NNLayer};
 
     use super::{DistributedAddChip, DistributedAddConfig, InputSizeConfig};
     use halo2_proofs::{
@@ -183,9 +198,7 @@ mod tests {
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
-        plonk::{
-            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance, Fixed,
-        },
+        plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Fixed, Instance},
     };
     use ndarray::{stack, Array, Array1, Array2, Array3, Axis, Zip};
 
@@ -232,7 +245,12 @@ mod tests {
                 input_depth: DEPTH,
             };
 
-            let dist_mul_chip = DistributedAddChip::configure(meta, config, &mut advice_allocator, &mut fixed_allocator);
+            let dist_mul_chip = DistributedAddChip::configure(
+                meta,
+                config,
+                &mut advice_allocator,
+                &mut fixed_allocator,
+            );
 
             DistributedAddTestConfig {
                 input: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH), || {
@@ -303,15 +321,25 @@ mod tests {
                 },
             )?;
 
-            let scalars = layouter.assign_region(|| "scalar input assignment", |mut region| {
-                self.scalars.iter().enumerate().map(|(row, &scalar)| {
-                    region.assign_advice(|| "assign scalar", config.scalar_advice, row, || scalar)
-            }).collect()})?;
+            let scalars = layouter.assign_region(
+                || "scalar input assignment",
+                |mut region| {
+                    self.scalars
+                        .iter()
+                        .enumerate()
+                        .map(|(row, &scalar)| {
+                            region.assign_advice(
+                                || "assign scalar",
+                                config.scalar_advice,
+                                row,
+                                || scalar,
+                            )
+                        })
+                        .collect()
+                },
+            )?;
 
-            let inputs = (
-                inputs,
-                scalars,
-            );
+            let inputs = (inputs, scalars);
 
             let output = dist_mul_chip.add_layer(&mut layouter, inputs, ())?;
             let input = config.output.view();

@@ -3,17 +3,12 @@ use std::marker::PhantomData;
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
-    plonk::{
-        Advice, Fixed, Column, ConstraintSystem, Error as PlonkError,
-        Selector,
-    },
+    plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Fixed, Selector},
     poly::Rotation,
 };
-use ndarray::{
-    Array1, Array2, Array3, Axis, Zip, Array,
-};
+use ndarray::{Array, Array1, Array2, Array3, Axis, Zip};
 
-use crate::nn_ops::{NNLayer, InputSizeConfig, ColumnAllocator};
+use crate::nn_ops::{ColumnAllocator, InputSizeConfig, NNLayer};
 
 #[derive(Clone, Debug)]
 pub struct DistributedAddMulAddConfig<F: FieldExt> {
@@ -68,23 +63,35 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddMulAddChip<F> {
         meta: &mut ConstraintSystem<F>,
         config: InputSizeConfig,
         advice_allocator: &mut ColumnAllocator<Advice>,
-        fixed_allocator: &mut ColumnAllocator<Fixed>
-        // inputs: Array2<Column<Advice>>,
-        // outputs: Array2<Column<Advice>>,
-        // scalars: Array1<(Column<Advice>, Column<Advice>, Column<Advice>)>,
+        fixed_allocator: &mut ColumnAllocator<Fixed>, // inputs: Array2<Column<Advice>>,
+                                                      // outputs: Array2<Column<Advice>>,
+                                                      // scalars: Array1<(Column<Advice>, Column<Advice>, Column<Advice>)>,
     ) -> <Self as Chip<F>>::Config {
         let selector = meta.selector();
-        let InputSizeConfig { input_height, input_width, input_depth } = config;
-        let advice = advice_allocator.take(meta, input_depth*input_width*2);
+        let InputSizeConfig {
+            input_height,
+            input_width,
+            input_depth,
+        } = config;
+        let advice = advice_allocator.take(meta, input_depth * input_width * 2);
         let fixed = fixed_allocator.take(meta, input_depth * 3);
 
-        let inputs = Array::from_shape_vec((input_depth, input_width), advice[0..(input_depth*input_width)].to_vec()).unwrap();
-        let outputs = Array::from_shape_vec((input_depth, input_width), advice[(input_depth*input_width)..(input_depth*input_width)*2].to_vec()).unwrap();
+        let inputs = Array::from_shape_vec(
+            (input_depth, input_width),
+            advice[0..(input_depth * input_width)].to_vec(),
+        )
+        .unwrap();
+        let outputs = Array::from_shape_vec(
+            (input_depth, input_width),
+            advice[(input_depth * input_width)..(input_depth * input_width) * 2].to_vec(),
+        )
+        .unwrap();
 
         let scalars = Array::from_shape_vec((input_depth, 3), fixed.to_vec()).unwrap();
-        let scalars: Array1<_> = scalars.axis_iter(Self::DEPTH_AXIS).map(|scalars| {
-            (scalars[0], scalars[1], scalars[2])
-        }).collect();
+        let scalars: Array1<_> = scalars
+            .axis_iter(Self::DEPTH_AXIS)
+            .map(|scalars| (scalars[0], scalars[1], scalars[2]))
+            .collect();
 
         meta.create_gate("Dist Mult", |meta| {
             let sel = meta.query_selector(selector);
@@ -196,17 +203,17 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddMulAddChip<F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::nn_ops::{NNLayer, ColumnAllocator, InputSizeConfig};
+    use crate::nn_ops::{ColumnAllocator, InputSizeConfig, NNLayer};
 
-    use super::{DistributedAddMulAddChip, DistributedAddMulAddConfig, DistributedAddMulAddChipParams};
+    use super::{
+        DistributedAddMulAddChip, DistributedAddMulAddChipParams, DistributedAddMulAddConfig,
+    };
     use halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
-        plonk::{
-            Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance, Fixed,
-        },
+        plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Fixed, Instance},
     };
     use ndarray::{stack, Array, Array1, Array2, Array3, Axis, Zip};
 
@@ -254,7 +261,12 @@ mod tests {
                 input_depth: DEPTH,
             };
 
-            let dist_mul_chip = DistributedAddMulAddChip::configure(meta, config, &mut advice_allocator, &mut fixed_allocator);
+            let dist_mul_chip = DistributedAddMulAddChip::configure(
+                meta,
+                config,
+                &mut advice_allocator,
+                &mut fixed_allocator,
+            );
 
             DistributedAddMulAddTestConfig {
                 input: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH), || {

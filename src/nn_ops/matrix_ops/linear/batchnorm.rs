@@ -3,18 +3,19 @@ use std::marker::PhantomData;
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
-    plonk::{
-        Advice, Column, ConstraintSystem, Error as PlonkError, Fixed,
-    },
+    plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Fixed},
 };
-use ndarray::{
-    stack, Array1, Array2, Array3, Axis,
-};
+use ndarray::{stack, Array1, Array2, Array3, Axis};
 
 use crate::{
-    nn_ops::matrix_ops::linear::dist_addmultadd::{DistributedAddMulAddChip, DistributedAddMulAddConfig},
-    nn_ops::{matrix_ops::non_linear::norm_2d::{Normalize2dChip, Normalize2dConfig}, NNLayer, DecompConfig, ColumnAllocator, InputSizeConfig},
-    nn_ops::matrix_ops::linear::dist_addmultadd::DistributedAddMulAddChipParams
+    nn_ops::matrix_ops::linear::dist_addmultadd::DistributedAddMulAddChipParams,
+    nn_ops::matrix_ops::linear::dist_addmultadd::{
+        DistributedAddMulAddChip, DistributedAddMulAddConfig,
+    },
+    nn_ops::{
+        matrix_ops::non_linear::norm_2d::{Normalize2dChip, Normalize2dConfig},
+        ColumnAllocator, DecompConfig, InputSizeConfig, NNLayer,
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -48,7 +49,7 @@ pub struct BatchnormChipConfig<F: FieldExt> {
     input_height: usize,
     input_width: usize,
     input_depth: usize,
-    norm_2d_chip: Normalize2dConfig<F>
+    norm_2d_chip: Normalize2dConfig<F>,
 }
 
 pub struct BatchnormChipParams<F: FieldExt> {
@@ -63,7 +64,6 @@ impl<F: FieldExt> NNLayer<F> for BatchnormChip<F> {
     type LayerParams = BatchnormChipParams<F>;
 
     type LayerOutput = Array3<AssignedCell<F, F>>;
-
 
     fn construct(config: <Self as Chip<F>>::Config) -> Self {
         Self { config }
@@ -81,7 +81,12 @@ impl<F: FieldExt> NNLayer<F> for BatchnormChip<F> {
             input_depth: config.input_depth,
         };
 
-        let add_mult_add_chip = DistributedAddMulAddChip::configure(meta, dist_config, advice_allocator, fixed_allocator);
+        let add_mult_add_chip = DistributedAddMulAddChip::configure(
+            meta,
+            dist_config,
+            advice_allocator,
+            fixed_allocator,
+        );
 
         BatchnormConfig {
             add_mult_add_chip,
@@ -96,15 +101,11 @@ impl<F: FieldExt> NNLayer<F> for BatchnormChip<F> {
         inputs: Array3<AssignedCell<F, F>>,
         params: BatchnormChipParams<F>,
     ) -> Result<Array3<AssignedCell<F, F>>, PlonkError> {
-        let BatchnormChipParams {
-            scalars
-        } = params;
+        let BatchnormChipParams { scalars } = params;
         let layouter = &mut layouter.namespace(|| "Batchnorm");
         let config = &self.config;
 
-        let params = DistributedAddMulAddChipParams {
-            scalars,
-        };
+        let params = DistributedAddMulAddChipParams { scalars };
 
         let un_normed_output =
             DistributedAddMulAddChip::construct(config.add_mult_add_chip.clone())
@@ -125,9 +126,12 @@ impl<F: FieldExt> NNLayer<F> for BatchnormChip<F> {
         // )
         // .unwrap())
 
-        Normalize2dChip::construct(config.norm_2d_chip.clone()).add_layer(layouter, un_normed_output, ())
+        Normalize2dChip::construct(config.norm_2d_chip.clone()).add_layer(
+            layouter,
+            un_normed_output,
+            (),
+        )
     }
-
 }
 
 // #[cfg(test)]
