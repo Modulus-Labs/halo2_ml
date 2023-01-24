@@ -549,8 +549,8 @@ fn main() {
 
     let circuit = NNCircuit::<Fr> {
         layers,
-        input: input,
-        output: output,
+        input,
+        output,
     };
 
     // MockProver::run(11, &circuit, vec![input, output])

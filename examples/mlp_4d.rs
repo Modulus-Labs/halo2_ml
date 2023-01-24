@@ -1,11 +1,10 @@
 use halo2_machinelearning::{nn_ops::vector_ops::linear::fc::FcParams, NNCircuit};
 use halo2_proofs::{
     circuit::Value,
-    dev::MockProver,
     halo2curves::{bn256::Bn256, bn256::Fr},
     plonk::{create_proof, keygen_pk, keygen_vk},
     poly::{
-        commitment::{Params, ParamsProver},
+        commitment::{ParamsProver},
         kzg::{commitment::ParamsKZG, multiopen::ProverSHPLONK},
     },
     transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},
@@ -19,7 +18,7 @@ use rand::rngs::OsRng;
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-fn main() -> () {
+fn main() {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::builder().testing().build();
 
@@ -52,9 +51,9 @@ fn main() -> () {
         },
     ];
 
-    let input: Vec<Fr> = vec![1048576; 4].into_iter().map(|x| Fr::from(x)).collect();
+    let input: Vec<Fr> = vec![1048576; 4].into_iter().map(Fr::from).collect();
 
-    let output: Vec<Fr> = vec![22020096; 4].into_iter().map(|x| Fr::from(x)).collect();
+    let output: Vec<Fr> = vec![22020096; 4].into_iter().map(Fr::from).collect();
 
     let circuit = NNCircuit::<Fr> {
         layers,
