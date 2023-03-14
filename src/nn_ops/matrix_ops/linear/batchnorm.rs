@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use halo2_proofs::{
+use halo2_base::halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{Advice, ConstraintSystem, Error as PlonkError, Fixed},
@@ -21,7 +21,6 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct BatchnormConfig<F: FieldExt> {
     add_mult_add_chip: DistributedAddMulAddConfig<F>,
-    norm_2d_chip: Normalize2dConfig<F>,
     _marker: PhantomData<F>,
 }
 
@@ -45,19 +44,14 @@ impl<F: FieldExt> Chip<F> for BatchnormChip<F> {
     }
 }
 
-pub struct BatchnormChipConfig<F: FieldExt> {
-    input_height: usize,
-    input_width: usize,
-    input_depth: usize,
-    norm_2d_chip: Normalize2dConfig<F>,
-}
-
+#[derive(Clone, Debug)]
 pub struct BatchnormChipParams<F: FieldExt> {
-    scalars: Array1<(Value<F>, Value<F>, Value<F>)>,
+    ///tuple is mult, add, bias
+    pub scalars: Array1<(Value<F>, Value<F>, Value<F>)>,
 }
 
 impl<F: FieldExt> NNLayer<F> for BatchnormChip<F> {
-    type ConfigParams = BatchnormChipConfig<F>;
+    type ConfigParams = InputSizeConfig;
 
     type LayerInput = Array3<AssignedCell<F, F>>;
 
@@ -71,7 +65,7 @@ impl<F: FieldExt> NNLayer<F> for BatchnormChip<F> {
 
     fn configure(
         meta: &mut ConstraintSystem<F>,
-        config: BatchnormChipConfig<F>,
+        config: InputSizeConfig,
         advice_allocator: &mut ColumnAllocator<Advice>,
         fixed_allocator: &mut ColumnAllocator<Fixed>,
     ) -> <Self as Chip<F>>::Config {
@@ -90,7 +84,6 @@ impl<F: FieldExt> NNLayer<F> for BatchnormChip<F> {
 
         BatchnormConfig {
             add_mult_add_chip,
-            norm_2d_chip: config.norm_2d_chip,
             _marker: PhantomData,
         }
     }
@@ -109,7 +102,7 @@ impl<F: FieldExt> NNLayer<F> for BatchnormChip<F> {
 
         let un_normed_output =
             DistributedAddMulAddChip::construct(config.add_mult_add_chip.clone())
-                .add_layer(layouter, inputs, params)?;
+                .add_layer(layouter, inputs, params);
         // Ok(stack(
         //     Self::DEPTH_AXIS,
         //     un_normed_output
@@ -126,18 +119,20 @@ impl<F: FieldExt> NNLayer<F> for BatchnormChip<F> {
         // )
         // .unwrap())
 
-        Normalize2dChip::construct(config.norm_2d_chip.clone()).add_layer(
-            layouter,
-            un_normed_output,
-            (),
-        )
+        // Normalize2dChip::construct(config.norm_2d_chip.clone()).add_layer(
+        //     layouter,
+        //     un_normed_output,
+        //     (),
+        // )
+
+        un_normed_output
     }
 }
 
 // #[cfg(test)]
 // mod tests {
 //     use super::{BatchnormChip, BatchnormConfig};
-//     use halo2_proofs::{
+//     use halo2_base::halo2_proofs::{
 //         arithmetic::FieldExt,
 //         circuit::{AssignedCell, Chip, Layouter, SimpleFloorPlanner, Value},
 //         dev::MockProver,

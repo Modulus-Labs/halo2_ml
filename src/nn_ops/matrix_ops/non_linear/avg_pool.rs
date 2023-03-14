@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use halo2_proofs::{
+use halo2_base::halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Expression, Fixed, Selector},
@@ -190,7 +190,7 @@ mod tests {
 
     use super::{AvgPool2DChip, AvgPool2DConfig};
     use crate::nn_ops::DefaultDecomp;
-    use halo2_proofs::{
+    use halo2_base::halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,

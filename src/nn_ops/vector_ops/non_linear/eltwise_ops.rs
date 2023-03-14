@@ -1,6 +1,6 @@
 use std::{fmt::Debug, marker::PhantomData};
 
-use halo2_proofs::{
+use halo2_base::halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{
@@ -55,7 +55,7 @@ impl<F: FieldExt, const BASE: usize> Chip<F> for ReluChip<F, BASE> {
 }
 
 impl<F: FieldExt, const BASE: usize> ReluChip<F, BASE> {
-    const ADVICE_LEN: usize = 10;
+    const ADVICE_LEN: usize = 7;
 
     pub fn construct(config: DecompConfig<F>) -> Self {
         Self { config }
@@ -261,7 +261,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> Chip<F> for NormalizeChip<F
 }
 
 impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeChip<F, BASE, K> {
-    const ADVICE_LEN: usize = 10;
+    const ADVICE_LEN: usize = 7;
 
     pub fn construct(config: DecompConfig<F>) -> Self {
         Self { config }
@@ -489,7 +489,7 @@ impl<F: FieldExt, const BASE: usize, const K: usize> Chip<F> for NormalizeReluCh
 }
 
 impl<F: FieldExt, const BASE: usize, const K: usize> NormalizeReluChip<F, BASE, K> {
-    const ADVICE_LEN: usize = 10;
+    const ADVICE_LEN: usize = 7;
 
     pub fn construct(config: DecompConfig<F>) -> Self {
         Self { config }

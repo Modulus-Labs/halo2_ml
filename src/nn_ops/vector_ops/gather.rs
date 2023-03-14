@@ -1,5 +1,4 @@
-use halo2_curves::FieldExt;
-use halo2_proofs::circuit::AssignedCell;
+use halo2_base::halo2_proofs::{arithmetic::FieldExt, circuit::AssignedCell};
 use ndarray::Array1;
 
 pub fn gather<F: FieldExt>(
@@ -15,7 +14,7 @@ pub fn gather<F: FieldExt>(
 #[cfg(test)]
 mod tests {
 
-    use halo2_proofs::{
+    use halo2_base::halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,

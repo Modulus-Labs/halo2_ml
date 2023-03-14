@@ -1,14 +1,14 @@
 #![feature(associated_type_defaults)]
 pub mod nn_ops;
 
-use halo2_proofs::{
+use halo2_base::halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{Layouter, SimpleFloorPlanner},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Fixed, Instance},
 };
 use nn_ops::{
     vector_ops::{
-        linear::fc::{FcConfig, FcParams},
+        linear::fc_old::{FcConfig, FcParams},
         non_linear::eltwise_ops::NormalizeReluChip,
     },
     DefaultDecomp,
@@ -17,7 +17,7 @@ use nn_ops::{
 use crate::nn_ops::{
     lookup_ops::DecompTable,
     vector_ops::{
-        linear::fc::{FcChip, FcChipConfig},
+        linear::fc_old::{FcChip, FcChipConfig},
         non_linear::eltwise_ops::NormalizeChip,
     },
     ColumnAllocator, NNLayer,
@@ -28,6 +28,14 @@ pub fn felt_from_i64<F: FieldExt>(x: i64) -> F {
         F::from(x.unsigned_abs())
     } else {
         F::from(x.unsigned_abs()).neg()
+    }
+}
+
+pub fn felt_to_i64<F: FieldExt>(x: F) -> i64 {
+    if x > F::TWO_INV {
+        -(x.neg().get_lower_128() as i64)
+    } else {
+        x.get_lower_128() as i64
     }
 }
 

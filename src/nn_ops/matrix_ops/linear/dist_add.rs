@@ -1,12 +1,12 @@
 use std::marker::PhantomData;
 
-use halo2_proofs::{
+use halo2_base::halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter},
     plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Fixed, Selector},
     poly::Rotation,
 };
-use ndarray::{Array, Array1, Array2, Array3, Zip};
+use ndarray::{Array, Array1, Array2, Array3, Axis, Zip};
 
 use crate::nn_ops::{ColumnAllocator, InputSizeConfig, NNLayer};
 
@@ -15,9 +15,9 @@ pub struct DistributedAddConfig<F: FieldExt> {
     //pub in_width: usize,
     //pub in_height: usize,
     //pub in_depth: usize,
-    pub inputs: Array2<Column<Advice>>,
-    pub outputs: Array2<Column<Advice>>,
-    pub scalars: Array1<Column<Advice>>,
+    pub inputs: Array1<Column<Advice>>,
+    pub outputs: Array1<Column<Advice>>,
+    pub scalar: Column<Advice>,
     pub selector: Selector,
     _marker: PhantomData<F>,
 }
@@ -67,53 +67,34 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddChip<F> {
             input_width,
             input_depth,
         } = config;
-        let advice = advice_allocator.take(meta, input_depth * input_width * 2 + input_depth);
+        let advice = advice_allocator.take(meta, (input_width * 2) + 1);
 
-        let inputs = Array::from_shape_vec(
-            (input_depth, input_width),
-            advice[0..(input_depth * input_width)].to_vec(),
-        )
-        .unwrap();
-        let outputs = Array::from_shape_vec(
-            (input_depth, input_width),
-            advice[(input_depth * input_width)..(input_depth * input_width) * 2].to_vec(),
-        )
-        .unwrap();
+        let inputs = Array::from_shape_vec(input_width, advice[0..input_width].to_vec()).unwrap();
+        let outputs =
+            Array::from_shape_vec(input_width, advice[input_width..(input_width * 2)].to_vec())
+                .unwrap();
 
-        let scalars = Array::from_shape_vec(
-            input_depth,
-            advice[(input_depth * input_width) * 2..(input_depth * input_width) * 2 + input_depth]
-                .to_vec(),
-        )
-        .unwrap();
+        let scalar = advice[input_width * 2];
 
         let selector = meta.selector();
         meta.create_gate("Dist Add", |meta| {
             let sel = meta.query_selector(selector);
+            let scalar = meta.query_advice(scalar, Rotation::cur());
             inputs
-                .axis_iter(Self::DEPTH_AXIS)
-                .zip(outputs.axis_iter(Self::DEPTH_AXIS))
-                .zip(scalars.iter())
-                .map(|((inputs, outputs), scalar)| {
-                    let scalar = meta.query_advice(*scalar, Rotation::cur());
-                    inputs
-                        .into_iter()
-                        .zip(outputs.into_iter())
-                        .map(|(input, output)| {
-                            let input = meta.query_advice(*input, Rotation::cur());
-                            let output = meta.query_advice(*output, Rotation::cur());
-                            sel.clone() * (input + scalar.clone() - output)
-                        })
-                        .collect::<Vec<_>>()
+                .iter()
+                .zip(outputs.iter())
+                .map(|(&input, &output)| {
+                    let input = meta.query_advice(input, Rotation::cur());
+                    let output = meta.query_advice(output, Rotation::cur());
+                    sel.clone() * (input + scalar.clone() - output)
                 })
-                .flatten()
                 .collect::<Vec<_>>()
         });
 
         DistributedAddConfig {
             inputs,
             outputs,
-            scalars,
+            scalar,
             selector,
             _marker: PhantomData,
         }
@@ -127,63 +108,89 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddChip<F> {
     ) -> Result<Array3<AssignedCell<F, F>>, PlonkError> {
         let config = &self.config;
         let (inputs, scalars) = inputs;
+        let input_dim = inputs.dim();
 
-        layouter.assign_region(
-            || "Distributed Addition",
-            |mut region| {
-                //Copy Inputs
-                inputs
-                    .axis_iter(Self::ROW_AXIS)
-                    .enumerate()
-                    .for_each(|(row, inputs)| {
-                        Zip::from(inputs)
-                            .and(config.inputs.view())
-                            .for_each(|input, &column| {
-                                input
-                                    .copy_advice(|| "Copy Input", &mut region, column, row)
-                                    .unwrap();
-                            })
-                    });
+        let outputs_vec: Result<Vec<_>, _> = inputs
+            .axis_iter(Self::DEPTH_AXIS)
+            .zip(scalars.iter())
+            .map(|(inputs, scalar)| {
+                layouter.assign_region(
+                    || "Distributed Addition",
+                    |mut region| {
+                        //Copy Inputs
+                        inputs
+                            .axis_iter(Axis(1))
+                            .enumerate()
+                            .for_each(|(row, inputs)| {
+                                Zip::from(inputs).and(config.inputs.view()).for_each(
+                                    |input, &column| {
+                                        input
+                                            .copy_advice(|| "Copy Input", &mut region, column, row)
+                                            .unwrap();
+                                    },
+                                )
+                            });
 
-                //Assign Scalars
-                let row_count = inputs.dim().2;
+                        //Assign Scalars
+                        let row_count = inputs.dim().1;
 
-                scalars
-                    .iter()
-                    .zip(config.scalars.iter())
-                    .for_each(|(scalar, &column)| {
                         for row in 0..row_count {
                             // region
                             //     .assign_advice(|| "Assign Scalar", column, row, || scalar)
                             //     .unwrap();
                             scalar
-                                .copy_advice(|| "Copy Scalar", &mut region, column, row)
+                                .copy_advice(|| "Copy Scalar", &mut region, config.scalar, row)
                                 .unwrap();
                         }
-                    });
 
-                //Assign Outputs
-                // Ok(Zip::indexed(inputs.view()).and_broadcast(config.outputs.view()).and_broadcast(scalars.view()).map_collect(|(_, _, row), input, &column, scalar| {
-                //     let output = *scalar * input.value();
-                //     region.assign_advice(|| "Assign Output", column, row, || output).unwrap()
-                // }))
-                Ok(
-                    Zip::indexed(inputs.view()).map_collect(|(channel, column, row), input| {
-                        let output =
-                            scalars.get(channel).unwrap().value().map(|f| *f) + input.value();
-                        config.selector.enable(&mut region, row).unwrap();
-                        region
-                            .assign_advice(
-                                || "Assign Output",
-                                *config.outputs.get((channel, column)).unwrap(),
-                                row,
-                                || output,
-                            )
-                            .unwrap()
-                    }),
+                        //Assign Outputs
+                        // Ok(Zip::indexed(inputs.view()).and_broadcast(config.outputs.view()).and_broadcast(scalars.view()).map_collect(|(_, _, row), input, &column, scalar| {
+                        //     let output = *scalar * input.value();
+                        //     region.assign_advice(|| "Assign Output", column, row, || output).unwrap()
+                        // }))
+                        Ok(
+                            // Zip::indexed(inputs.view()).map_collect(|(column, row), input| {
+                            //     let output =
+                            //         scalar.value().map(|x| *x) + input.value();
+                            //     config.selector.enable(&mut region, row).unwrap();
+                            //     region
+                            //         .assign_advice(
+                            //             || "Assign Output",
+                            //             *config.outputs.get(column).unwrap(),
+                            //             row,
+                            //             || output,
+                            //         )
+                            //         .unwrap()
+                            // }),
+                            inputs
+                                .axis_iter(Axis(0))
+                                .zip(config.outputs.iter())
+                                .map(|(slice, &column)| {
+                                    slice
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(row, input)| {
+                                            let output = scalar.value().map(|x| *x) + input.value();
+                                            config.selector.enable(&mut region, row).unwrap();
+                                            region
+                                                .assign_advice(
+                                                    || "Assign Output",
+                                                    column,
+                                                    row,
+                                                    || output,
+                                                )
+                                                .unwrap()
+                                        })
+                                        .collect::<Vec<_>>()
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                    },
                 )
-            },
-        )
+            })
+            .collect();
+        let outputs_vec = outputs_vec?.into_iter().flatten().flatten().collect();
+        Ok(Array::from_shape_vec(input_dim, outputs_vec).unwrap())
     }
 }
 
@@ -192,7 +199,7 @@ mod tests {
     use crate::nn_ops::{ColumnAllocator, NNLayer};
 
     use super::{DistributedAddChip, DistributedAddConfig, InputSizeConfig};
-    use halo2_proofs::{
+    use halo2_base::halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,

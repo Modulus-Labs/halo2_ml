@@ -1,4 +1,4 @@
-use halo2_machinelearning::{nn_ops::vector_ops::linear::fc::FcParams, NNCircuit};
+use halo2_machinelearning::{nn_ops::vector_ops::linear::fc_old::FcParams, NNCircuit};
 use halo2_proofs::{circuit::Value, poly::commitment::CommitmentScheme};
 
 use halo2_curves::bn256::{Bn256, Fq, Fr, G1Affine};

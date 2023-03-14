@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use halo2_proofs::{
+use halo2_base::halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Expression, Fixed, Selector},
@@ -12,7 +12,7 @@ use ndarray::{stack, Array, Array1, Array2, Array3, Axis};
 use crate::nn_ops::{lookup_ops::DecompTable, ColumnAllocator, DecompConfig, NNLayer};
 
 #[derive(Clone, Debug)]
-pub struct ReluNorm2DConfig<F: FieldExt> {
+pub struct Relu2DConfig<F: FieldExt> {
     //pub in_width: usize,
     //pub in_height: usize,
     //pub in_depth: usize,
@@ -27,12 +27,12 @@ pub struct ReluNorm2DConfig<F: FieldExt> {
 /// Chip for 2d eltwise
 ///
 /// Order for ndarrays is Channel-in, Width, Height
-pub struct ReluNorm2DChip<F: FieldExt> {
-    config: ReluNorm2DConfig<F>,
+pub struct Relu2DChip<F: FieldExt> {
+    config: Relu2DConfig<F>,
 }
 
-impl<F: FieldExt> Chip<F> for ReluNorm2DChip<F> {
-    type Config = ReluNorm2DConfig<F>;
+impl<F: FieldExt> Chip<F> for Relu2DChip<F> {
+    type Config = Relu2DConfig<F>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -44,15 +44,15 @@ impl<F: FieldExt> Chip<F> for ReluNorm2DChip<F> {
     }
 }
 
-pub struct ReluNorm2DChipConfig<F: FieldExt, Decomp: DecompConfig> {
+pub struct Relu2DChipConfig<F: FieldExt, Decomp: DecompConfig> {
     pub input_height: usize,
     pub input_width: usize,
     pub input_depth: usize,
     pub range_table: DecompTable<F, Decomp>,
 }
 
-impl<F: FieldExt> NNLayer<F> for ReluNorm2DChip<F> {
-    type ConfigParams = ReluNorm2DChipConfig<F, Self::DecompConfig>;
+impl<F: FieldExt> NNLayer<F> for Relu2DChip<F> {
+    type ConfigParams = Relu2DChipConfig<F, Self::DecompConfig>;
 
     type LayerInput = Array3<AssignedCell<F, F>>;
 
@@ -129,28 +129,16 @@ impl<F: FieldExt> NNLayer<F> for ReluNorm2DChip<F> {
                             .reduce(|accum, item| accum + item)
                             .unwrap();
 
-                        let trunc_sum = iter
-                            .clone()
-                            .skip(Self::DecompConfig::K)
-                            .enumerate()
-                            .map(|(index, column)| {
-                                let b = meta.query_advice(*column, Rotation::cur());
-                                let true_base =
-                                    (0..index).fold(F::from(1), |expr, _input| expr * base);
-                                b * true_base
-                            })
-                            .reduce(|accum, item| accum + item)
-                            .unwrap();
-
                         let constant_1 = Expression::Constant(F::from(1));
                         expressions.push(
                             sel.clone()
                                 * (bit_sign.clone() * (input.clone() - word_sum.clone())
-                                    + (constant_1.clone() - bit_sign.clone()) * (input + word_sum)),
+                                    + (constant_1.clone() - bit_sign.clone())
+                                        * (input.clone() + word_sum)),
                         );
                         expressions.push(
                             sel.clone()
-                                * ((bit_sign.clone() * (output.clone() - trunc_sum))
+                                * ((bit_sign.clone() * (output.clone() - input))
                                     + ((constant_1 - bit_sign) * (output))),
                         );
 
@@ -161,7 +149,7 @@ impl<F: FieldExt> NNLayer<F> for ReluNorm2DChip<F> {
             expressions
         });
 
-        ReluNorm2DConfig {
+        Relu2DConfig {
             inputs,
             outputs,
             eltwise_inter,
@@ -180,134 +168,133 @@ impl<F: FieldExt> NNLayer<F> for ReluNorm2DChip<F> {
         let base: u128 = Self::DecompConfig::BASE.try_into().unwrap();
         let config = &self.config;
 
-        let output: Result<Vec<_>, _> = inputs.axis_iter(Self::DEPTH_AXIS).map(|inputs| {
-        layouter.assign_region(
-            || "apply 2d normalize",
-            |mut region| {
-                let outputs = inputs
-                    .axis_iter(Axis(1))
-                    .enumerate()
-                    .map(|(offset, inputs)| {
-                        self.config.selector.enable(&mut region, offset)?;
+        let output: Result<Vec<_>, _> = inputs
+            .axis_iter(Self::DEPTH_AXIS)
+            .map(|inputs| {
+                layouter.assign_region(
+                    || "apply 2d normalize",
+                    |mut region| {
                         let outputs = inputs
-                            .iter()
-                            .zip(config.inputs.iter())
-                            .zip(config.outputs.iter())
-                            .zip(config.eltwise_inter.axis_iter(Axis(0)))
-                            .zip(config.bit_signs.iter())
-                            .map(
-                                |(
-                                    (((input, &input_col), &output_col), eltwise_inter),
-                                    &bit_sign_col,
-                                )| {
-                                    let value = input.copy_advice(
-                                        || "eltwise input",
-                                        &mut region,
-                                        input_col,
-                                        offset,
-                                    )?;
-                                    let bit_sign = value.value().map(|x| match *x < F::TWO_INV {
-                                        false => 0,
-                                        true => 1,
-                                    });
+                            .axis_iter(Axis(1))
+                            .enumerate()
+                            .map(|(offset, inputs)| {
+                                self.config.selector.enable(&mut region, offset)?;
+                                let outputs = inputs
+                                    .iter()
+                                    .zip(config.inputs.iter())
+                                    .zip(config.outputs.iter())
+                                    .zip(config.eltwise_inter.axis_iter(Axis(0)))
+                                    .zip(config.bit_signs.iter())
+                                    .map(
+                                        |(
+                                            (((input, &input_col), &output_col), eltwise_inter),
+                                            &bit_sign_col,
+                                        )| {
+                                            let value = input.copy_advice(
+                                                || "eltwise input",
+                                                &mut region,
+                                                input_col,
+                                                offset,
+                                            )?;
+                                            let bit_sign =
+                                                value.value().map(|x| match *x < F::TWO_INV {
+                                                    false => 0,
+                                                    true => 1,
+                                                });
 
-                                    // let word_repr: Value<Vec<u32>> = output_i32.map(|x| {
-                                    //     let str = format!("{:o}", x.abs());
-                                    //     str.chars()
-                                    //         .map(|char| char.to_digit(8).unwrap())
-                                    //         .rev()
-                                    //         .collect()
-                                    // });
+                                            // let word_repr: Value<Vec<u32>> = output_i32.map(|x| {
+                                            //     let str = format!("{:o}", x.abs());
+                                            //     str.chars()
+                                            //         .map(|char| char.to_digit(8).unwrap())
+                                            //         .rev()
+                                            //         .collect()
+                                            // });
 
-                                    let output_abs = value.value().map(|x| {
-                                        let x = *x;
-                                        if x < F::TWO_INV {
-                                            x.get_lower_128()
-                                        } else {
-                                            x.neg().get_lower_128()
-                                        }
-                                    });
-                                    let word_repr: Value<Vec<u16>> =
-                                        output_abs.and_then(|mut x| {
-                                            let mut result = vec![];
-
-                                            loop {
-                                                let m = x % base;
-                                                x /= base;
-
-                                                result.push(m as u16);
-                                                if x == 0 {
-                                                    break;
-                                                }
-                                            }
-
-                                            Value::known(result)
-                                        });
-                                    region.assign_advice(
-                                        || "eltwise_inter bit_sign",
-                                        bit_sign_col,
-                                        offset,
-                                        || bit_sign.map(|x| F::from(x)),
-                                    )?;
-                                    let _: Vec<_> = (0..eltwise_inter.len())
-                                        .map(|index_col| {
-                                            region
-                                                .assign_advice(
-                                                    || "eltwise_inter word_repr",
-                                                    eltwise_inter[index_col],
-                                                    offset,
-                                                    || {
-                                                        word_repr.clone().map(|x| {
-                                                            match index_col >= x.len() {
-                                                                false => {
-                                                                    F::from(x[index_col] as u64)
-                                                                }
-                                                                true => F::from(0),
-                                                            }
-                                                        })
-                                                    },
-                                                )
-                                                .unwrap()
-                                        })
-                                        .collect();
-                                    region.assign_advice(
-                                        || "eltwise_output",
-                                        output_col,
-                                        offset,
-                                        || {
-                                            value.value().map(|x| {
+                                            let output_abs = value.value().map(|x| {
                                                 let x = *x;
                                                 if x < F::TWO_INV {
-                                                    F::from_u128(
-                                                        x.get_lower_128()
-                                                            / u128::try_from(
-                                                                Self::DecompConfig::BASE.pow(u32::try_from(Self::DecompConfig::K).unwrap()),
-                                                            )
-                                                            .unwrap(),
-                                                    )
+                                                    x.get_lower_128()
                                                 } else {
-                                                    F::zero()
+                                                    x.neg().get_lower_128()
                                                 }
-                                            })
+                                            });
+                                            let word_repr: Value<Vec<u16>> =
+                                                output_abs.and_then(|mut x| {
+                                                    let mut result = vec![];
+
+                                                    loop {
+                                                        let m = x % base;
+                                                        x /= base;
+
+                                                        result.push(m as u16);
+                                                        if x == 0 {
+                                                            break;
+                                                        }
+                                                    }
+
+                                                    Value::known(result)
+                                                });
+                                            region.assign_advice(
+                                                || "eltwise_inter bit_sign",
+                                                bit_sign_col,
+                                                offset,
+                                                || bit_sign.map(|x| F::from(x)),
+                                            )?;
+                                            let _: Vec<_> = (0..eltwise_inter.len())
+                                                .map(|index_col| {
+                                                    region
+                                                        .assign_advice(
+                                                            || "eltwise_inter word_repr",
+                                                            eltwise_inter[index_col],
+                                                            offset,
+                                                            || {
+                                                                word_repr.clone().map(|x| {
+                                                                    match index_col >= x.len() {
+                                                                        false => F::from(
+                                                                            x[index_col] as u64,
+                                                                        ),
+                                                                        true => F::from(0),
+                                                                    }
+                                                                })
+                                                            },
+                                                        )
+                                                        .unwrap()
+                                                })
+                                                .collect();
+                                            region.assign_advice(
+                                                || "eltwise_output",
+                                                output_col,
+                                                offset,
+                                                || {
+                                                    value.value().map(|x| {
+                                                        let x = *x;
+                                                        if x < F::TWO_INV {
+                                                            x
+                                                        } else {
+                                                            F::zero()
+                                                        }
+                                                    })
+                                                },
+                                            )
                                         },
                                     )
-                                },
-                            )
+                                    .collect::<Result<Vec<_>, _>>()?;
+                                Ok::<_, PlonkError>(Array1::from_vec(outputs))
+                            })
                             .collect::<Result<Vec<_>, _>>()?;
-                        Ok::<_, PlonkError>(Array1::from_vec(outputs))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(stack(
-                    Axis(1),
-                    outputs
-                        .iter()
-                        .map(|item| item.view())
-                        .collect::<Vec<_>>()
-                        .as_slice(),
+                        Ok(stack(
+                            Axis(1),
+                            outputs
+                                .iter()
+                                .map(|item| item.view())
+                                .collect::<Vec<_>>()
+                                .as_slice(),
+                        )
+                        .unwrap())
+                    },
                 )
-                .unwrap())
-            },
-        )}).collect();
+            })
+            .collect();
 
         Ok(stack(
             Axis(0),
@@ -325,8 +312,8 @@ impl<F: FieldExt> NNLayer<F> for ReluNorm2DChip<F> {
 mod tests {
     use crate::nn_ops::{lookup_ops::DecompTable, ColumnAllocator, DefaultDecomp, NNLayer};
 
-    use super::{ReluNorm2DChip, ReluNorm2DChipConfig, ReluNorm2DConfig};
-    use halo2_proofs::{
+    use super::{Relu2DChip, Relu2DChipConfig, Relu2DConfig};
+    use halo2_base::halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
@@ -336,15 +323,15 @@ mod tests {
     use ndarray::{stack, Array, Array1, Array2, Array3, Axis, Zip};
 
     #[derive(Clone, Debug)]
-    struct ReluNorm2DTestConfig<F: FieldExt> {
+    struct Relu2DTestConfig<F: FieldExt> {
         input: Array2<Column<Instance>>,
         input_advice: Array2<Column<Advice>>,
         output: Array2<Column<Instance>>,
-        norm_chip: ReluNorm2DConfig<F>,
+        norm_chip: Relu2DConfig<F>,
         range_table: DecompTable<F, DefaultDecomp>,
     }
 
-    struct ReluNorm2DTestCircuit<F: FieldExt> {
+    struct Relu2DTestCircuit<F: FieldExt> {
         pub input: Array3<Value<F>>,
     }
 
@@ -353,8 +340,8 @@ mod tests {
 
     const DEPTH: usize = 4;
 
-    impl<F: FieldExt> Circuit<F> for ReluNorm2DTestCircuit<F> {
-        type Config = ReluNorm2DTestConfig<F>;
+    impl<F: FieldExt> Circuit<F> for Relu2DTestCircuit<F> {
+        type Config = Relu2DTestConfig<F>;
 
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -369,7 +356,7 @@ mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let range_table = DecompTable::configure(meta);
 
-            let config = ReluNorm2DChipConfig {
+            let config = Relu2DChipConfig {
                 input_height: INPUT_HEIGHT,
                 input_width: INPUT_WIDTH,
                 input_depth: DEPTH,
@@ -379,14 +366,10 @@ mod tests {
             let mut advice_allocator = ColumnAllocator::<Advice>::new(meta, 1);
             let mut fixed_allocator = ColumnAllocator::<Fixed>::new(meta, 0);
 
-            let norm_chip = ReluNorm2DChip::configure(
-                meta,
-                config,
-                &mut advice_allocator,
-                &mut fixed_allocator,
-            );
+            let norm_chip =
+                Relu2DChip::configure(meta, config, &mut advice_allocator, &mut fixed_allocator);
 
-            ReluNorm2DTestConfig {
+            Relu2DTestConfig {
                 input: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH), || {
                     let col = meta.instance_column();
                     meta.enable_equality(col);
@@ -412,7 +395,7 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), PlonkError> {
-            let norm_chip: ReluNorm2DChip<F> = ReluNorm2DChip::construct(config.norm_chip);
+            let norm_chip: Relu2DChip<F> = Relu2DChip::construct(config.norm_chip);
 
             config
                 .range_table
@@ -473,15 +456,15 @@ mod tests {
     #[test]
     ///test that a simple 8x8 normalization works
     fn test_simple_norm() -> Result<(), PlonkError> {
-        let circuit = ReluNorm2DTestCircuit {
+        let circuit = Relu2DTestCircuit {
             input: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH, INPUT_HEIGHT), || {
-                Value::known(Fr::from(1_048_576).neg())
+                Value::known(Fr::from(1_048_576))
             }),
         };
 
-        let mut input_instance =
-            vec![vec![Fr::from(1_048_576).neg(); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
-        let mut output_instance = vec![vec![Fr::zero(); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
+        let mut input_instance = vec![vec![Fr::from(1_048_576); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
+        let mut output_instance =
+            vec![vec![Fr::from(1_048_576); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
 
         input_instance.append(&mut output_instance);
 

@@ -12,7 +12,7 @@ use ndarray::{stack, Array, Array1, Array2, Array3, Axis};
 use crate::nn_ops::{lookup_ops::DecompTable, ColumnAllocator, DecompConfig, NNLayer};
 
 #[derive(Clone, Debug)]
-pub struct Normalize2dConfig<F: FieldExt> {
+pub struct ReluNorm2DConfig<F: FieldExt> {
     //pub in_width: usize,
     //pub in_height: usize,
     //pub in_depth: usize,
@@ -27,12 +27,12 @@ pub struct Normalize2dConfig<F: FieldExt> {
 /// Chip for 2d eltwise
 ///
 /// Order for ndarrays is Channel-in, Width, Height
-pub struct Normalize2dChip<F: FieldExt> {
-    config: Normalize2dConfig<F>,
+pub struct ReluNorm2DChip<F: FieldExt> {
+    config: ReluNorm2DConfig<F>,
 }
 
-impl<F: FieldExt> Chip<F> for Normalize2dChip<F> {
-    type Config = Normalize2dConfig<F>;
+impl<F: FieldExt> Chip<F> for ReluNorm2DChip<F> {
+    type Config = ReluNorm2DConfig<F>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -44,15 +44,15 @@ impl<F: FieldExt> Chip<F> for Normalize2dChip<F> {
     }
 }
 
-pub struct Normalize2DChipConfig<F: FieldExt, Decomp: DecompConfig> {
+pub struct ReluNorm2DChipConfig<F: FieldExt, Decomp: DecompConfig> {
     pub input_height: usize,
     pub input_width: usize,
     pub input_depth: usize,
     pub range_table: DecompTable<F, Decomp>,
 }
 
-impl<F: FieldExt> NNLayer<F> for Normalize2dChip<F> {
-    type ConfigParams = Normalize2DChipConfig<F, Self::DecompConfig>;
+impl<F: FieldExt> NNLayer<F> for ReluNorm2DChip<F> {
+    type ConfigParams = ReluNorm2DChipConfig<F, Self::DecompConfig>;
 
     type LayerInput = Array3<AssignedCell<F, F>>;
 
@@ -150,8 +150,8 @@ impl<F: FieldExt> NNLayer<F> for Normalize2dChip<F> {
                         );
                         expressions.push(
                             sel.clone()
-                                * ((bit_sign.clone() * (output.clone() - trunc_sum.clone()))
-                                    + ((constant_1 - bit_sign) * (output + trunc_sum))),
+                                * ((bit_sign.clone() * (output.clone() - trunc_sum))
+                                    + ((constant_1 - bit_sign) * (output))),
                         );
 
                         expressions
@@ -161,7 +161,7 @@ impl<F: FieldExt> NNLayer<F> for Normalize2dChip<F> {
             expressions
         });
 
-        Normalize2dConfig {
+        ReluNorm2DConfig {
             inputs,
             outputs,
             eltwise_inter,
@@ -286,14 +286,7 @@ impl<F: FieldExt> NNLayer<F> for Normalize2dChip<F> {
                                                             .unwrap(),
                                                     )
                                                 } else {
-                                                    F::from_u128(
-                                                        x.neg().get_lower_128()
-                                                            / u128::try_from(
-                                                                Self::DecompConfig::BASE.pow(u32::try_from(Self::DecompConfig::K).unwrap()),
-                                                            )
-                                                            .unwrap(),
-                                                    )
-                                                    .neg()
+                                                    F::zero()
                                                 }
                                             })
                                         },
@@ -330,40 +323,28 @@ impl<F: FieldExt> NNLayer<F> for Normalize2dChip<F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::nn_ops::{
-        lookup_ops::DecompTable, matrix_ops::non_linear::norm_2d::Normalize2DChipConfig,
-        ColumnAllocator, DefaultDecomp, NNLayer,
-    };
+    use crate::nn_ops::{lookup_ops::DecompTable, ColumnAllocator, DefaultDecomp, NNLayer};
 
-    use super::{Normalize2dChip, Normalize2dConfig};
+    use super::{ReluNorm2DChip, ReluNorm2DChipConfig, ReluNorm2DConfig};
     use halo2_base::halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
-        plonk::{
-            create_proof, keygen_pk, keygen_vk, Advice, Circuit, Column, ConstraintSystem,
-            Error as PlonkError, Fixed, Instance,
-        },
-        poly::{
-            commitment::ParamsProver,
-            kzg::{commitment::ParamsKZG, multiopen::ProverSHPLONK},
-        },
-        transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},
+        plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Fixed, Instance},
     };
     use ndarray::{stack, Array, Array1, Array2, Array3, Axis, Zip};
-    use rand::rngs::OsRng;
 
     #[derive(Clone, Debug)]
-    struct Norm2DTestConfig<F: FieldExt> {
+    struct ReluNorm2DTestConfig<F: FieldExt> {
         input: Array2<Column<Instance>>,
         input_advice: Array2<Column<Advice>>,
         output: Array2<Column<Instance>>,
-        norm_chip: Normalize2dConfig<F>,
+        norm_chip: ReluNorm2DConfig<F>,
         range_table: DecompTable<F, DefaultDecomp>,
     }
 
-    struct Norm2DTestCircuit<F: FieldExt> {
+    struct ReluNorm2DTestCircuit<F: FieldExt> {
         pub input: Array3<Value<F>>,
     }
 
@@ -372,8 +353,8 @@ mod tests {
 
     const DEPTH: usize = 4;
 
-    impl<F: FieldExt> Circuit<F> for Norm2DTestCircuit<F> {
-        type Config = Norm2DTestConfig<F>;
+    impl<F: FieldExt> Circuit<F> for ReluNorm2DTestCircuit<F> {
+        type Config = ReluNorm2DTestConfig<F>;
 
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -388,7 +369,7 @@ mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let range_table = DecompTable::configure(meta);
 
-            let config = Normalize2DChipConfig {
+            let config = ReluNorm2DChipConfig {
                 input_height: INPUT_HEIGHT,
                 input_width: INPUT_WIDTH,
                 input_depth: DEPTH,
@@ -398,14 +379,14 @@ mod tests {
             let mut advice_allocator = ColumnAllocator::<Advice>::new(meta, 1);
             let mut fixed_allocator = ColumnAllocator::<Fixed>::new(meta, 0);
 
-            let norm_chip = Normalize2dChip::configure(
+            let norm_chip = ReluNorm2DChip::configure(
                 meta,
                 config,
                 &mut advice_allocator,
                 &mut fixed_allocator,
             );
 
-            Norm2DTestConfig {
+            ReluNorm2DTestConfig {
                 input: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH), || {
                     let col = meta.instance_column();
                     meta.enable_equality(col);
@@ -431,7 +412,7 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), PlonkError> {
-            let norm_chip: Normalize2dChip<F> = Normalize2dChip::construct(config.norm_chip);
+            let norm_chip: ReluNorm2DChip<F> = ReluNorm2DChip::construct(config.norm_chip);
 
             config
                 .range_table
@@ -492,45 +473,21 @@ mod tests {
     #[test]
     ///test that a simple 8x8 normalization works
     fn test_simple_norm() -> Result<(), PlonkError> {
-        let circuit = Norm2DTestCircuit {
+        let circuit = ReluNorm2DTestCircuit {
             input: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH, INPUT_HEIGHT), || {
-                Value::known(Fr::from(1_048_576))
+                Value::known(Fr::from(1_048_576).neg())
             }),
         };
 
-        let mut input_instance = vec![vec![Fr::from(1_048_576); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
-        let mut output_instance = vec![vec![Fr::one(); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
+        let mut input_instance =
+            vec![vec![Fr::from(1_048_576).neg(); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
+        let mut output_instance = vec![vec![Fr::zero(); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
 
         input_instance.append(&mut output_instance);
 
         MockProver::run(11, &circuit, input_instance)
             .unwrap()
             .assert_satisfied();
-
-        // let params: ParamsKZG<Bn256> = ParamsProver::new(11);
-
-        // let vk = keygen_vk(&params, &circuit).unwrap();
-
-        // let pk = keygen_pk(&params, vk, &circuit).unwrap();
-
-        // let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-
-        // //let now = Instant::now();
-
-        // println!("starting proof!");
-
-        // let instances: Vec<_> = input_instance.iter().map(|x| {
-        //     x.as_slice()
-        // }).collect();
-
-        // create_proof::<_, ProverSHPLONK<Bn256>, _, _, _, _>(
-        //     &params,
-        //     &pk,
-        //     &[circuit],
-        //     &[instances.as_slice()],
-        //     OsRng,
-        //     &mut transcript,
-        // )?;
 
         Ok(())
     }

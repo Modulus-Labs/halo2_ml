@@ -1,9 +1,9 @@
 use std::marker::PhantomData;
 
-use halo2_proofs::{
+use halo2_base::halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Expression, Selector},
+    plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Expression, Fixed, Selector},
     poly::Rotation,
 };
 
@@ -13,8 +13,10 @@ use crate::{
     felt_from_i64,
     nn_ops::{
         lookup_ops::DecompTable,
-        vector_ops::non_linear::eltwise_ops::{DecompConfig, EltwiseInstructions, NormalizeChip},
-        DefaultDecomp,
+        vector_ops::non_linear::eltwise_ops::{
+            DecompConfig as EltwiseConfig, EltwiseInstructions, NormalizeChip,
+        },
+        ColumnAllocator, DecompConfig, DefaultDecomp, NNLayer,
     },
 };
 
@@ -30,18 +32,18 @@ pub struct SigmoidConfig<F: FieldExt> {
     pub comp_signs: Column<Advice>,
     pub comp_selector: Selector,
     pub output_selector: Selector,
-    pub norm_chip: DecompConfig<F>,
+    pub norm_chip: EltwiseConfig<F>,
     _marker: PhantomData<F>,
 }
 
 /// Chip for 2d Sigmoid
 ///
 /// Order for ndarrays is Channel-in, Width, Height
-pub struct SigmoidChip<F: FieldExt, const BASE: usize> {
+pub struct SigmoidChip<F: FieldExt> {
     config: SigmoidConfig<F>,
 }
 
-impl<F: FieldExt, const BASE: usize> Chip<F> for SigmoidChip<F, BASE> {
+impl<F: FieldExt> Chip<F> for SigmoidChip<F> {
     type Config = SigmoidConfig<F>;
     type Loaded = ();
 
@@ -54,30 +56,45 @@ impl<F: FieldExt, const BASE: usize> Chip<F> for SigmoidChip<F, BASE> {
     }
 }
 
-impl<F: FieldExt, const BASE: usize> SigmoidChip<F, BASE> {
-    const COLUMN_AXIS: Axis = Axis(0);
-    const ROW_AXIS: Axis = Axis(1);
-    const ADVICE_LEN: usize = 10;
+pub struct SigmoidChipConfig<F: FieldExt, Decomp: DecompConfig> {
+    pub range_table: DecompTable<F, Decomp>,
+    pub norm_chip: EltwiseConfig<F>,
+}
+
+impl<F: FieldExt> SigmoidChip<F> {
     const CEIL: u64 = 2_097_152; //2 * 2^20
     const MAX_VALUE: u64 = 1_099_511_627_776; //1 * (2^20)^2
     const FLOOR: i64 = -2_097_152;
     const MIN_VALUE: u64 = 0;
     const SCALAR: u64 = 262_144; //.25 * 2^20
     const ADDITIVE_BIAS: u64 = 549_755_813_888; //.5 * (2^20)^2
+}
 
-    pub fn construct(config: <Self as Chip<F>>::Config) -> Self {
+impl<F: FieldExt> NNLayer<F> for SigmoidChip<F> {
+    type ConfigParams = SigmoidChipConfig<F, Self::DecompConfig>;
+
+    type LayerInput = Array1<AssignedCell<F, F>>;
+
+    type LayerOutput = Array1<AssignedCell<F, F>>;
+
+    const COLUMN_AXIS: Axis = Axis(0);
+    const ROW_AXIS: Axis = Axis(1);
+
+    fn construct(config: <Self as Chip<F>>::Config) -> Self {
         Self { config }
     }
 
-    pub fn configure(
+    fn configure(
         meta: &mut ConstraintSystem<F>,
-        inputs: Column<Advice>,
-        ranges: Column<Advice>,
-        outputs: Column<Advice>,
-        eltwise_inter: Array1<Column<Advice>>,
-        range_table: DecompTable<F, DefaultDecomp>,
-        norm_chip: DecompConfig<F>,
+        config: SigmoidChipConfig<F, Self::DecompConfig>,
+        advice_allocator: &mut ColumnAllocator<Advice>,
+        _: &mut ColumnAllocator<Fixed>,
     ) -> <Self as Chip<F>>::Config {
+        let SigmoidChipConfig {
+            range_table,
+            norm_chip,
+        } = config;
+
         let comp_selector = meta.complex_selector();
         let output_selector = meta.selector();
 
@@ -87,6 +104,13 @@ impl<F: FieldExt, const BASE: usize> SigmoidChip<F, BASE> {
 
         let scalar = F::from(Self::SCALAR);
         let additive_bias = F::from(Self::ADDITIVE_BIAS);
+
+        let advice = advice_allocator.take(meta, 4 + Self::DecompConfig::ADVICE_LEN);
+        let inputs = advice[0];
+        let ranges = advice[1];
+        let outputs = advice[2];
+
+        let eltwise_inter = Array1::from_vec(advice[3..advice.len()].to_vec());
 
         for &item in eltwise_inter.iter() {
             meta.lookup("lookup", |meta| {
@@ -104,11 +128,11 @@ impl<F: FieldExt, const BASE: usize> SigmoidChip<F, BASE> {
             let sel = meta.query_selector(comp_selector);
 
             //iterate over all elements to the input
-            let base: u64 = BASE.try_into().unwrap();
+            let base: u64 = Self::DecompConfig::BASE.try_into().unwrap();
             assert_eq!(
-                Self::ADVICE_LEN, eltwise_inter_vec.len(),
+                Self::DecompConfig::ADVICE_LEN, eltwise_inter_vec.len(),
                 "Must pass in sufficient advice columns for eltwise intermediate operations: passed in {}, need {}", 
-                eltwise_inter_vec.len(), Self::ADVICE_LEN
+                eltwise_inter_vec.len(), Self::DecompConfig::ADVICE_LEN
             );
             let input = meta.query_advice(inputs, Rotation::cur());
             let comp_sign = meta.query_advice(comp_signs, Rotation::cur());
@@ -165,12 +189,13 @@ impl<F: FieldExt, const BASE: usize> SigmoidChip<F, BASE> {
         }
     }
 
-    pub fn add_layer(
+    fn add_layer(
         &self,
         layouter: &mut impl Layouter<F>,
-        inputs: &Array1<AssignedCell<F, F>>,
+        inputs: Array1<AssignedCell<F, F>>,
+        _: (),
     ) -> Result<Array1<AssignedCell<F, F>>, PlonkError> {
-        let base: u128 = BASE.try_into().unwrap();
+        let base: u128 = Self::DecompConfig::BASE.try_into().unwrap();
         let config = &self.config;
 
         let ciel = F::from(Self::CEIL);
@@ -340,7 +365,8 @@ impl<F: FieldExt, const BASE: usize> SigmoidChip<F, BASE> {
             },
         )?;
 
-        let norm_chip = NormalizeChip::<F, BASE, 2>::construct(config.norm_chip.clone());
+        //todo!() fix this stupidity
+        let norm_chip = NormalizeChip::<F, 1024, 2>::construct(config.norm_chip.clone());
         sigmoid_output
             .into_iter()
             .map(|sigmoid| {
@@ -355,18 +381,19 @@ mod tests {
     use crate::{
         felt_from_i64,
         nn_ops::{
-            lookup_ops::DecompTable, vector_ops::non_linear::eltwise_ops::NormalizeChip,
-            DefaultDecomp,
+            lookup_ops::DecompTable,
+            vector_ops::non_linear::{eltwise_ops::NormalizeChip, sigmoid::SigmoidChipConfig},
+            ColumnAllocator, DefaultDecomp, NNLayer,
         },
     };
 
     use super::{SigmoidChip, SigmoidConfig};
-    use halo2_proofs::{
+    use halo2_base::halo2_proofs::{
         arithmetic::FieldExt,
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr,
-        plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Instance},
+        plonk::{Advice, Circuit, Column, ConstraintSystem, Error as PlonkError, Fixed, Instance},
     };
     use ndarray::{Array, Array1, Zip};
 
@@ -419,12 +446,6 @@ mod tests {
                 col
             });
 
-            let ranges = {
-                let col = meta.advice_column();
-                meta.enable_equality(col);
-                col
-            };
-
             let range_table: DecompTable<F, DefaultDecomp> = DecompTable::configure(meta);
 
             let norm_chip = NormalizeChip::<_, 1024, 2>::configure(
@@ -435,15 +456,17 @@ mod tests {
                 range_table.clone(),
             );
 
-            let sigmoid_chip = SigmoidChip::<_, 1024>::configure(
-                meta,
-                inputs,
-                ranges,
-                outputs,
-                eltwise_inter,
-                range_table.clone(),
+            let config = SigmoidChipConfig {
+                range_table: range_table.clone(),
                 norm_chip,
-            );
+            };
+
+            let mut advice_allocator = ColumnAllocator::<Advice>::new(meta, 1);
+
+            let mut fixed_allocator = ColumnAllocator::<Fixed>::new(meta, 0);
+
+            let sigmoid_chip =
+                SigmoidChip::configure(meta, config, &mut advice_allocator, &mut fixed_allocator);
 
             SigmoidTestConfig {
                 input: {
@@ -471,7 +494,7 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), PlonkError> {
-            let norm_chip: SigmoidChip<F, 1024> = SigmoidChip::construct(config.sigmoid_chip);
+            let norm_chip = SigmoidChip::construct(config.sigmoid_chip);
 
             config
                 .range_table
@@ -498,7 +521,7 @@ mod tests {
                 },
             )?;
 
-            let output = norm_chip.add_layer(&mut layouter, &inputs)?;
+            let output = norm_chip.add_layer(&mut layouter, inputs, ())?;
             for (row, output) in output.iter().enumerate() {
                 layouter
                     .constrain_instance(output.cell(), config.output, row)

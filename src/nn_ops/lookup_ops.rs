@@ -1,6 +1,6 @@
 use std::{fmt::Debug, marker::PhantomData};
 
-use halo2_proofs::{
+use halo2_base::halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{Layouter, Value},
     plonk::{ConstraintSystem, Error as PlonkError, TableColumn},

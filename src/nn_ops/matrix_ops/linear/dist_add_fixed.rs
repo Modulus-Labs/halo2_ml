@@ -6,18 +6,18 @@ use halo2_base::halo2_proofs::{
     plonk::{Advice, Column, ConstraintSystem, Error as PlonkError, Fixed, Selector},
     poly::Rotation,
 };
-use ndarray::{Array, Array1, Array2, Array3, Zip, Axis};
+use ndarray::{Array, Array1, Array2, Array3, Axis, Zip};
 
 use crate::nn_ops::{ColumnAllocator, InputSizeConfig, NNLayer};
 
 #[derive(Clone, Debug)]
-pub struct DistributedAddMulAddConfig<F: FieldExt> {
+pub struct DistributedAddFixedConfig<F: FieldExt> {
     //pub in_width: usize,
     //pub in_height: usize,
     //pub in_depth: usize,
     pub inputs: Array1<Column<Advice>>,
     pub outputs: Array1<Column<Advice>>,
-    pub scalar: (Column<Fixed>, Column<Fixed>, Column<Fixed>),
+    pub scalar: Column<Fixed>,
     pub selector: Selector,
     _marker: PhantomData<F>,
 }
@@ -25,12 +25,12 @@ pub struct DistributedAddMulAddConfig<F: FieldExt> {
 /// Chip for Distrubted Addition by a constant
 ///
 /// Order for ndarrays is Channel-in, Width, Height
-pub struct DistributedAddMulAddChip<F: FieldExt> {
-    config: DistributedAddMulAddConfig<F>,
+pub struct DistributedAddFixedChip<F: FieldExt> {
+    config: DistributedAddFixedConfig<F>,
 }
 
-impl<F: FieldExt> Chip<F> for DistributedAddMulAddChip<F> {
-    type Config = DistributedAddMulAddConfig<F>;
+impl<F: FieldExt> Chip<F> for DistributedAddFixedChip<F> {
+    type Config = DistributedAddFixedConfig<F>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -43,15 +43,14 @@ impl<F: FieldExt> Chip<F> for DistributedAddMulAddChip<F> {
 }
 
 #[derive(Clone, Debug)]
-pub struct DistributedAddMulAddChipParams<F: FieldExt> {
-    ///Order is Scalar, Shift, Bias
-    pub scalars: Array1<(Value<F>, Value<F>, Value<F>)>,
+pub struct DistributedAddFixedChipParams<F: FieldExt> {
+    pub scalars: Array1<Value<F>>,
 }
 
-impl<F: FieldExt> NNLayer<F> for DistributedAddMulAddChip<F> {
+impl<F: FieldExt> NNLayer<F> for DistributedAddFixedChip<F> {
     type LayerInput = Array3<AssignedCell<F, F>>;
 
-    type LayerParams = DistributedAddMulAddChipParams<F>;
+    type LayerParams = DistributedAddFixedChipParams<F>;
 
     type LayerOutput = Array3<AssignedCell<F, F>>;
 
@@ -71,10 +70,7 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddMulAddChip<F> {
             input_depth,
         } = config;
         let advice = advice_allocator.take(meta, (input_width * 2));
-        let fixed = fixed_allocator.take(meta, 3);
-        let scalar_scalar = fixed[0];
-        let shift_scalar = fixed[1];
-        let bias_scalar = fixed[2];
+        let scalar = fixed_allocator.take(meta, 1)[0];
 
         let inputs = Array::from_shape_vec(input_width, advice[0..input_width].to_vec()).unwrap();
         let outputs =
@@ -82,26 +78,24 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddMulAddChip<F> {
                 .unwrap();
 
         let selector = meta.selector();
-        meta.create_gate("Dist Add Mul Add", |meta| {
+        meta.create_gate("Dist Add Fixed", |meta| {
             let sel = meta.query_selector(selector);
-            let scalar_scalar = meta.query_fixed(scalar_scalar, Rotation::cur());
-            let shift_scalar = meta.query_fixed(shift_scalar, Rotation::cur());
-            let bias_scalar = meta.query_fixed(bias_scalar, Rotation::cur());
+            let scalar = meta.query_fixed(scalar, Rotation::cur());
             inputs
                 .iter()
                 .zip(outputs.iter())
                 .map(|(&input, &output)| {
                     let input = meta.query_advice(input, Rotation::cur());
                     let output = meta.query_advice(output, Rotation::cur());
-                    sel.clone() * (((input + shift_scalar.clone()) * scalar_scalar.clone()) + bias_scalar.clone() - output)
+                    sel.clone() * (input + scalar.clone() - output)
                 })
                 .collect::<Vec<_>>()
         });
 
-        DistributedAddMulAddConfig {
+        DistributedAddFixedConfig {
             inputs,
             outputs,
-            scalar: (scalar_scalar, shift_scalar, bias_scalar),
+            scalar,
             selector,
             _marker: PhantomData,
         }
@@ -111,7 +105,7 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddMulAddChip<F> {
         &self,
         layouter: &mut impl Layouter<F>,
         inputs: Array3<AssignedCell<F, F>>,
-        params: DistributedAddMulAddChipParams<F>,
+        params: DistributedAddFixedChipParams<F>,
     ) -> Result<Array3<AssignedCell<F, F>>, PlonkError> {
         let config = &self.config;
         let scalars = params.scalars;
@@ -124,7 +118,6 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddMulAddChip<F> {
                 layouter.assign_region(
                     || "Distributed Addition Fixed",
                     |mut region| {
-                        let (scalar_scalar, shift_scalar, bias_scalar) = scalar;
                         //Copy Inputs
                         inputs
                             .axis_iter(Axis(1))
@@ -144,13 +137,7 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddMulAddChip<F> {
 
                         for row in 0..row_count {
                             region
-                                .assign_fixed(|| "Assign Scalar", config.scalar.0, row, || *scalar_scalar)
-                                .unwrap();
-                            region
-                                .assign_fixed(|| "Assign Scalar", config.scalar.1, row, || *shift_scalar)
-                                .unwrap();
-                            region
-                                .assign_fixed(|| "Assign Scalar", config.scalar.2, row, || *bias_scalar)
+                                .assign_fixed(|| "Assign Scalar", config.scalar, row, || *scalar)
                                 .unwrap();
                         }
 
@@ -181,7 +168,7 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddMulAddChip<F> {
                                         .iter()
                                         .enumerate()
                                         .map(|(row, input)| {
-                                            let output = ((*shift_scalar + input.value()) * scalar_scalar) + bias_scalar;
+                                            let output = *scalar + input.value();
                                             config.selector.enable(&mut region, row).unwrap();
                                             region
                                                 .assign_advice(
@@ -207,10 +194,11 @@ impl<F: FieldExt> NNLayer<F> for DistributedAddMulAddChip<F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::nn_ops::{ColumnAllocator, InputSizeConfig, NNLayer};
+    use crate::nn_ops::{ColumnAllocator, NNLayer};
 
     use super::{
-        DistributedAddMulAddChip, DistributedAddMulAddChipParams, DistributedAddMulAddConfig,
+        DistributedAddFixedChip, DistributedAddFixedChipParams, DistributedAddFixedConfig,
+        InputSizeConfig,
     };
     use halo2_base::halo2_proofs::{
         arithmetic::FieldExt,
@@ -222,15 +210,15 @@ mod tests {
     use ndarray::{stack, Array, Array1, Array2, Array3, Axis, Zip};
 
     #[derive(Clone, Debug)]
-    struct DistributedAddMulAddTestConfig<F: FieldExt> {
+    struct DistributedAddFixedTestConfig<F: FieldExt> {
         input: Array2<Column<Instance>>,
         input_advice: Array2<Column<Advice>>,
         output: Array2<Column<Instance>>,
-        dist_mul_chip: DistributedAddMulAddConfig<F>,
+        dist_mul_chip: DistributedAddFixedConfig<F>,
     }
 
-    struct DistributedAddMulAddTestCircuit<F: FieldExt> {
-        pub scalars: Array1<(Value<F>, Value<F>, Value<F>)>,
+    struct DistributedAddFixedTestCircuit<F: FieldExt> {
+        pub scalars: Array1<Value<F>>,
         pub input: Array3<Value<F>>,
     }
 
@@ -239,16 +227,14 @@ mod tests {
 
     const DEPTH: usize = 4;
 
-    impl<F: FieldExt> Circuit<F> for DistributedAddMulAddTestCircuit<F> {
-        type Config = DistributedAddMulAddTestConfig<F>;
+    impl<F: FieldExt> Circuit<F> for DistributedAddFixedTestCircuit<F> {
+        type Config = DistributedAddFixedTestConfig<F>;
 
         type FloorPlanner = SimpleFloorPlanner;
 
         fn without_witnesses(&self) -> Self {
             Self {
-                scalars: Array::from_shape_simple_fn(DEPTH, || {
-                    (Value::unknown(), Value::unknown(), Value::unknown())
-                }),
+                scalars: Array::from_shape_simple_fn(DEPTH, || Value::unknown()),
                 input: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH, INPUT_HEIGHT), || {
                     Value::unknown()
                 }),
@@ -265,14 +251,14 @@ mod tests {
                 input_depth: DEPTH,
             };
 
-            let dist_mul_chip = DistributedAddMulAddChip::configure(
+            let dist_mul_chip = DistributedAddFixedChip::configure(
                 meta,
                 config,
                 &mut advice_allocator,
                 &mut fixed_allocator,
             );
 
-            DistributedAddMulAddTestConfig {
+            DistributedAddFixedTestConfig {
                 input: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH), || {
                     let col = meta.instance_column();
                     meta.enable_equality(col);
@@ -297,7 +283,7 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), PlonkError> {
-            let dist_mul_chip = DistributedAddMulAddChip::construct(config.dist_mul_chip);
+            let dist_mul_chip = DistributedAddFixedChip::construct(config.dist_mul_chip);
 
             let inputs = layouter.assign_region(
                 || "inputs",
@@ -336,7 +322,7 @@ mod tests {
                 },
             )?;
 
-            let params = DistributedAddMulAddChipParams {
+            let params = DistributedAddFixedChipParams {
                 scalars: self.scalars.clone(),
             };
 
@@ -356,24 +342,17 @@ mod tests {
     }
 
     #[test]
-    ///test that a simple 16x16x4 dist add_mult_add works
-    fn test_simple_add_mult_add() -> Result<(), PlonkError> {
-        let circuit = DistributedAddMulAddTestCircuit {
-            scalars: Array::from_shape_simple_fn(DEPTH, || {
-                (
-                    Value::known(Fr::from(2)),
-                    Value::known(Fr::from(1)),
-                    Value::known(Fr::from(1)),
-                )
-            }),
+    ///test that a simple 16x16x4 dist add works
+    fn test_simple_dist_add_fixed() -> Result<(), PlonkError> {
+        let circuit = DistributedAddFixedTestCircuit {
+            scalars: Array::from_shape_simple_fn(DEPTH, || Value::known(Fr::from(2))),
             input: Array::from_shape_simple_fn((DEPTH, INPUT_WIDTH, INPUT_HEIGHT), || {
                 Value::known(Fr::one())
             }),
         };
 
         let mut input_instance = vec![vec![Fr::one(); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
-
-        let mut output_instance = vec![vec![Fr::from(5); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
+        let mut output_instance = vec![vec![Fr::from(3); INPUT_HEIGHT]; INPUT_WIDTH * DEPTH];
 
         input_instance.append(&mut output_instance);
 

@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use halo2_proofs::{
+use halo2_base::halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{Chip, Layouter},
     plonk::{Advice, Column, ColumnType, ConstraintSystem, Error as PlonkError, Fixed},
@@ -22,7 +22,7 @@ pub trait DecompConfig: Debug + Clone {
 pub struct DefaultDecomp {}
 
 impl DecompConfig for DefaultDecomp {
-    const ADVICE_LEN: usize = 10;
+    const ADVICE_LEN: usize = 7;
     const BASE: usize = 1024;
     const K: usize = 2;
     const SCALING_FACTOR: u64 = 1_048_576;
@@ -70,7 +70,7 @@ impl ColumnAllocator<Fixed> {
             slice
         } else {
             let slice = &self.advice[0..n];
-            self.last_index = n;
+            //self.last_index = n;
             slice
         }
     }
@@ -110,16 +110,17 @@ impl ColumnAllocator<Advice> {
             slice
         } else {
             let slice = &self.advice[0..n];
-            self.last_index = n;
+            //self.last_index = n;
             slice
         }
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct InputSizeConfig {
-    input_height: usize,
-    input_width: usize,
-    input_depth: usize,
+    pub input_height: usize,
+    pub input_width: usize,
+    pub input_depth: usize,
 }
 
 pub trait NNLayer<F: FieldExt>: Chip<F> {

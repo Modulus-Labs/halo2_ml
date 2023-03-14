@@ -1,10 +1,10 @@
-use halo2_machinelearning::{nn_ops::vector_ops::linear::fc::FcParams, NNCircuit};
+use halo2_machinelearning::{nn_ops::vector_ops::linear::fc_old::FcParams, NNCircuit};
 use halo2_proofs::{
     circuit::Value,
     halo2curves::{bn256::Bn256, bn256::Fr},
     plonk::{create_proof, keygen_pk, keygen_vk},
     poly::{
-        commitment::{ParamsProver},
+        commitment::ParamsProver,
         kzg::{commitment::ParamsKZG, multiopen::ProverSHPLONK},
     },
     transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},

@@ -2,7 +2,7 @@
 use std::{collections::HashMap, time::Instant};
 
 use halo2_machinelearning::{
-    nn_ops::vector_ops::linear::fc::{FcChip, FcConfig, FcParams, NNLayerInstructions},
+    nn_ops::vector_ops::linear::fc_old::{FcChip, FcConfig, FcParams, NNLayerInstructions},
     nn_ops::{self, vector_ops::non_linear::eltwise_ops::NormalizeChip},
 };
 use halo2_proofs::{
